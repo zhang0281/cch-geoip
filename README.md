@@ -36,9 +36,9 @@ Compose 仅绑定宿主 `127.0.0.1:8080`。若此端口已占用，在 `.env` �
 
 ## 其他运行方式
 
-### 已发布 Docker Hub 镜像
+### 已发布 GHCR 镜像
 
-先按 [Docker Hub 发布说明](docs/DOCKERHUB.md) 发布镜像。本仓库不预设已存在的 Docker Hub 镜像；发布后，在 `.env` 设置 `CCH_GEOIP_IMAGE=docker.io/<username>/cch-geoip:<version>`，再执行：
+先按 [GHCR 发布说明](docs/GHCR.md) 发布镜像。本仓库不预设已存在的镜像；发布后，在 `.env` 设置 `CCH_GEOIP_IMAGE=ghcr.io/zhang0281/cch-geoip:<version>`，再执行：
 
 ```sh
 docker compose pull
@@ -46,6 +46,8 @@ docker compose up -d --no-build
 ```
 
 Compose 的 build 定义用于源码模式；`--no-build` 确保镜像模式不会隐式重建。updater 与数据库、名单 volumes 在两种模式下相同。
+
+Actions 使用自动生成的 GITHUB_TOKEN，无需额外发布凭据。首次 package 默认私有，公开 Git 仓库不自动公开镜像；需要匿名拉取时，在 package 设置中改为 Public。保持私有则部署机需先登录 GHCR，详见发布说明。
 
 ### 原生 binary
 
@@ -117,7 +119,7 @@ Compose 默认启用本地名单，原生二进制默认关闭，需 `THREAT_FEE
 
 文件形式的密钥可通过 Docker secret 挂载后设置 `_FILE` 环境变量。不要将真实 `.env`、secret 文件或 MMDB 提交到仓库。外部暴露服务须自行配置 TLS、鉴权和网关 rate limit；默认部署用于 Docker 内网或 localhost。
 
-Compose 额外支持 `CCH_GEOIP_IMAGE`（默认 `cch-geoip:local`）与 `GEOIP_HOST_PORT`（默认 8080）。账户与额度参阅 [ACCOUNTS.md](docs/ACCOUNTS.md)，发布步骤参阅 [DOCKERHUB.md](docs/DOCKERHUB.md)。
+Compose 额外支持 `CCH_GEOIP_IMAGE`（默认 `cch-geoip:local`）与 `GEOIP_HOST_PORT`（默认 8080）。账户与额度参阅 [ACCOUNTS.md](docs/ACCOUNTS.md)，发布步骤参阅 [GHCR.md](docs/GHCR.md)。
 
 ## 开发与验证
 

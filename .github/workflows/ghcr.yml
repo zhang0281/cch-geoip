@@ -1,4 +1,4 @@
-name: Publish Docker Hub
+name: Publish GHCR
 on:
   workflow_dispatch:
     inputs:
@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: dockerhub-publish
+  group: ghcr-publish
   cancel-in-progress: false
 jobs:
   verify:
@@ -18,22 +18,22 @@ jobs:
   publish:
     needs: verify
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     env:
       VERSION: ${{ inputs.version }}
-      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate publish configuration
-        env:
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
-          [[ "$DOCKERHUB_USERNAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || exit 1
-          test -n "$DOCKERHUB_TOKEN"
+          printf 'IMAGE=ghcr.io/%s\n' "${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
       - uses: docker/login-action@v4
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/setup-buildx-action@v4
       - uses: docker/build-push-action@v7
         with:
@@ -41,8 +41,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            docker.io/${{ vars.DOCKERHUB_USERNAME }}/cch-geoip:${{ inputs.version }}
-            docker.io/${{ vars.DOCKERHUB_USERNAME }}/cch-geoip:latest
+            ${{ env.IMAGE }}:${{ inputs.version }}
+            ${{ env.IMAGE }}:latest
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}

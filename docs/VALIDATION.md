@@ -2,6 +2,15 @@
 
 时间：2026-10-09。源码、配置与测试在 `/home/zhang/work/projects/cch-geoip`。未部署到 Oracle，也未修改既有 CCH。
 
+## GHCR 迁移
+
+发布 workflow 与说明迁至 `ghcr.yml` / [GHCR.md](GHCR.md)，仅 publish job 使用 packages: write 和自动生成的 GITHUB_TOKEN，保留 main 手动发布与完整 CI 前置门槛。未触发 GHCR 发布，也未更改 package 可见性；实际 registry 权限、双架构 manifest、拉取与运行仍待发布后验收。源码、Dockerfile 与 Compose 运行结构不变。
+
+- `actionlint` 通过；结构化 YAML 检查确认 main/manual 限制、verify 前置依赖、发布 job 权限与 GHCR 登录配置。
+- 实际执行 workflow 的配置脚本：合法版本与大写 fork 仓库名生成正确的小写镜像路径；带 v 前缀和非法版本被拒绝。
+- 使用合成凭据与 GHCR 镜像地址执行 Compose config 检查通过，未尝试拉取尚未发布的示例版本。
+- `make test vet smoke` 通过；文档本地链接检查、旧发布引用清理、变更与静态安全扫描通过。
+
 ## BLACKLIST 与发布配置增量验证
 
 2026-10-09，Go 1.26.9：
@@ -10,13 +19,13 @@
 - BLACKLIST mock 验证 JSON/IP/分数/时间戳/重复记录校验、IPv6、合法空列表、并发合并下载、命中跳过 CHECK、未命中读缓存/在线补漏、过期排除、401/403/429/503/坏 JSON 保留有效旧快照。
 - 下载尝试在网络前落盘，测试失败后重启不重复请求、首次失败无数据快照的限频恢复、缓存写入失败不下载、redirect 不访问目标。
 - 新增 `scripts/blacklist-smoke.py`，启动真实 binary，验证 config→Restore→Service→CCH JSON 路径；新鲜名单输出 score/flags/blocklist/last_reported_at，过期不评分，CHECK 关闭后未命中为 unknown。使用合成名单和凭据，已有 Attempt 阻止在线下载，没有请求真实 AbuseIPDB。
-- Dockerfile 用已校验的本地 Go builder 构建成功；scratch/non-root/read-only-rootfs 中现有 Geo 查询与新增 BLACKLIST 缓存写入/恢复通过。宿主 Docker Hub builder 直连约束同首版，默认远端 builder 由 GitHub CI 验证。
+- Dockerfile 用已校验的本地 Go builder 构建成功；scratch/non-root/read-only-rootfs 中现有 Geo 查询与新增 BLACKLIST 缓存写入/恢复通过。宿主基础镜像直连约束同首版，默认远端 builder 由 GitHub CI 验证。
 - ARM64 静态交叉编译通过，未新增 ARM64 真机验收。
 - `docker-compose.yml` 默认、local-only、镜像模式用合成凭据展开检查；`.env.example` 与服务配置对应，无真实密钥落盘。
-- `actionlint` 校验 CI reusable workflow 与 Docker Hub 手动发布 workflow 通过。Docker Hub PAT/username 未配置，本轮未发布 Docker Hub 镜像；发布后 manifest / pull / runtime 仍需验收。
+- 当时 `actionlint` 校验 CI reusable workflow 与手动发布 workflow 通过；未发布镜像。现行 GHCR workflow 验证见上节，发布后 manifest / pull / runtime 仍需验收。
 - `govulncheck`：No vulnerabilities found；模块、变更、静态安全和质量扫描通过。通用扫描仍有既有 smoke 编排函数长度警告，不替代执行测试。
 
-运行方式见 README；账户获取见 [ACCOUNTS.md](ACCOUNTS.md)，发布见 [DOCKERHUB.md](DOCKERHUB.md)。真实账号下载、真实 AbuseIPDB 到达性与 Oracle/CCH UI gate 仍未执行。
+运行方式见 README；账户获取见 [ACCOUNTS.md](ACCOUNTS.md)，发布见 [GHCR.md](GHCR.md)。真实账号下载、真实 AbuseIPDB 到达性与 Oracle/CCH UI gate 仍未执行。
 
 ## 首版已执行
 
@@ -25,7 +34,7 @@
 - `go vet ./...`、gofmt 检查通过。
 - `make smoke`：真实进程的 HTTP、Bearer 鉴权、中文名称、MMDB 读取、SIGHUP 热更新、损坏更新保留旧 reader、healthcheck、SIGTERM 均通过。
 - Dockerfile 完整多阶段构建及 `make docker-smoke` 通过；实际 scratch/non-root UID 65532/read-only rootfs 查询，CA pool/内置 tzdata、命名 volume 写权限/缓存恢复、healthcheck 与退出均通过。
-- 本机 Docker Hub Go 镜像直连受阻，构建时仅替换 `GO_IMAGE` 为使用 SHA256 已校验官方 Go archive 的本地 builder，并设置可用的 GOPROXY。生产 Dockerfile 默认 builder 的远端拉取由 GitHub CI 验证；最终镜像结构、entrypoint、权限与打包路径相同。
+- 本机 Go 基础镜像直连受阻，构建时仅替换 `GO_IMAGE` 为使用 SHA256 已校验官方 Go archive 的本地 builder，并设置可用的 GOPROXY。生产 Dockerfile 默认 builder 的远端拉取由 GitHub CI 验证；最终镜像结构、entrypoint、权限与打包路径相同。
 - AMD64 与 ARM64 静态 ELF cross build 通过；ARM64 未在真实 ARM 硬件运行。官方 updater v8.0.0 manifest 已确认 linux/amd64、linux/arm64 等架构。
 - `docker compose config --quiet` 使用合成占位凭据通过，未尝试假凭据下载。
 - Spamhaus DROP 真实已下载数据解析通过：IPv4 1672 个前缀、IPv6 91 个前缀。Tor 官方真实已下载出口名单解析通过：1212 个 IP。仅验证格式与本地解析，不验证每个 IP 的信誉真实性；这些外部文件不提交 Git。

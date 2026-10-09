@@ -67,7 +67,9 @@ SSRF 面被固定 provider URL 和 IP literal 验证收窄。AbuseIPDB 只向固
 
 2026-10-09：首版独立服务、官方 updater Compose、CCH-compatible API、local DROP/Tor 与 opt-in AbuseIPDB，加入 race / 进程 smoke / cross build / CI。
 
-2026-10-09：添加 AbuseIPDB BLACKLIST 本地优先、持久化尝试限频与 CHECK 独立开关；Compose 统一为 docker-compose.yml，补账户、运行和 Docker Hub 双架构发布文档。发布 workflow 仅 main 手动触发，完整 CI 成功后才发送 Docker Hub PAT；凭据由 GitHub secrets 输入，不在普通 push/PR 使用。
+2026-10-09：添加 AbuseIPDB BLACKLIST 本地优先、持久化尝试限频与 CHECK 独立开关；Compose 统一为 docker-compose.yml，补账户、运行和双架构发布文档。发布 workflow 仅 main 手动触发，完整 CI 成功后才发布镜像。
+
+2026-10-09：镜像发布迁至 GHCR；publish job 单独授予 packages: write，使用自动生成的 GITHUB_TOKEN，不另设发布 PAT。仓库路径转为小写，支持 fork namespace。verify job 保持只读，普通 push/PR 不发布；package 初次默认私有，不自动公开，部署者自行选择 Public 或带 read:packages 的部署机 PAT。旧发布 workflow 与说明移除，源码构建默认保持不变。
 
 质量复核接受项：`scripts/smoke.py` 与 `scripts/docker-smoke.py` 的 main 超过通用 50 行 heuristic；它是单次进程验收编排，统一 try/finally 保证子进程与临时目录清理，业务逻辑在 Go 包中。JSON/schema 常量与合成 fixture 的长行属于固定数据，不额外抽象。
 
