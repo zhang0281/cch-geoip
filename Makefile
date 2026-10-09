@@ -10,6 +10,7 @@ vet:
 smoke: build
 	go build -o bin/fixtures ./tools/fixtures
 	python3 scripts/smoke.py
+	python3 scripts/blacklist-smoke.py
 docker-smoke: smoke
 	CGO_ENABLED=0 go test -c -o bin/threat.test ./internal/threat
 	python3 scripts/docker-smoke.py

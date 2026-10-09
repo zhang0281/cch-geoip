@@ -1,4 +1,5 @@
 .git
+.code-abyss
 .env*
 secrets
 data

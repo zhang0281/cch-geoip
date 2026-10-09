@@ -13,8 +13,9 @@ MaxMind HTTPS → 官方 geoipupdate → City / ASN MMDB volume [外部数据→
                                             ↓ 只读
 CCH → CCH-compatible Go HTTP API → MMDB readers [调用方→查询接口]
                               ↘ 本地 Spamhaus DROP / Tor snapshot
-                              ↘ 可选 AbuseIPDB CHECK [被查询 IP→第三方，显式 opt-in]
+                              ↘ 可选 AbuseIPDB BLACKLIST snapshot → 未命中才 CHECK
 Spamhaus / Tor HTTPS → 每日更新 → 持久缓存 → 原子替换内存 snapshot
+AbuseIPDB BLACKLIST HTTPS → 持久化下载尝试 → 每日 JSON 快照 → 本地匹配
 ```
 
 核心代码：`internal/geoip` 管数据库生命周期；`internal/api` 管 CCH JSON 与输入边界；`internal/threat` 管信誉来源、状态和降级；`internal/config` 管环境变量校验；`cmd/cch-geoip` 管进程生命周期。`internal/testdb` 和 `tools/fixtures` 仅生成合成测试数据，生产 binary 不引用它们。
@@ -38,11 +39,15 @@ CCH 要求 `threat.score` 为数字、privacy/threat flags 为布尔。为了不
 
 首版加载 DROP v4/v6 与 Tor 出口；ASN-DROP、crawler 确认、VPN 库留待明确数据源后添加。DROP 匹配代表上游认定的恶意网络，使用本地 critical / 1 策略值；它不是攻击概率，也不证明每次请求恶意。Tor 属 privacy 信号，不增加 threat 分数。
 
-AbuseIPDB opt-in 使用 30 天内的 abuse confidence；不把 reports 数量直接当 attacker 证据。与 DROP 取最大值的聚合政策公开在 README / `_meta`，来源状态分别保留。只有分数达到 0.75 才设置 is_abuser / is_threat；阈值是本项目政策，不是提供方官方分类。
+AbuseIPDB opt-in 优先本地黑名单，未命中/过期才使用 CHECK 缓存或在线 CHECK。BLACKLIST 是 provider 的快照，CHECK 使用 30 天记录，不假称同一时间窗口；不把 reports 数量直接当 attacker 证据。与 DROP 取最大值的聚合政策公开在 README / `_meta`，来源状态分别保留。只有分数达到 0.75 才设置 is_abuser / is_threat；阈值是本项目政策，不是提供方官方分类。
+
+BLACKLIST 固定 HTTPS endpoint、不跟随 redirect、30 秒后台超时、8 MiB 体积上限、最多 10,000 条。完整验证 JSON、分数、IP、重复记录与时间戳，合法空数组可清空旧名单。下载时间与 provider generatedAt 双重 freshness；lastReportedAt 单独保留，不冒充 listed_at。免费账号不支持自定义置信度筛选，客户端不依赖该参数。未命中不是负面信誉结论；CHECK 被关闭时汇总状态明确为 unavailable。
+
+下载前原子保存 Attempt 与上次有效 Data，每 24 小时最多一次尝试；错误、429/auth 拒绝都不立即重试，重启读取 Attempt 限频。落盘失败不发送下载请求；结果落盘失败不替换内存快照。Refresh 串行锁与 Lookup 读锁分离，网络 I/O 不占 Lookup 锁。单实例且保留 volume 时跨重启限频；多个副本不共享锁，缓存丢失也会重置记录，不能承诺全账户的 5 次/日上限。未设置目录时仅进程内限频。
 
 名单在背景下载，体积上限 8 MiB，必须通过完整解析；DROP 保存原始 metadata/copyright，并检查发布时间。重新下载失败保留旧快照，超过 max age 则退出匹配。每天最多一次成功更新检查；持久缓存跨重启抑制重复成功下载。进程失败、缓存丢失或下载失败后的重启仍可能重试，不构成跨实例的全球调度保证。
 
-AbuseIPDB 使用固定 HTTPS endpoint、禁止 redirect（防 API key 被转发），限制响应 64 KiB。成功/失败缓存、同 IP 并发合并、16 个不同 IP 的并发上限、4096 项缓存限制、UTC 日预算及 429 cooldown 共同控制配额。预算/缓存不持久化，重启及多实例无法共用预算；部署者须保留远端配额余量。不开启后台自动 REPORT，不持久化被查询 IP。
+AbuseIPDB CHECK 使用固定 HTTPS endpoint、禁止 redirect（防 API key 被转发），限制响应 64 KiB。成功/失败缓存、同 IP 并发合并、16 个不同 IP 的并发上限、4096 项缓存限制、UTC 日预算及 429 cooldown 共同控制配额。CHECK 预算/缓存不持久化，重启及多实例无法共用预算；部署者须保留远端配额余量。不开启后台自动 REPORT，不持久化 CHECK 被查询 IP；只保存公开黑名单记录。
 
 ## 安全与运维
 
@@ -54,13 +59,15 @@ SSRF 面被固定 provider URL 和 IP literal 验证收窄。AbuseIPDB 只向固
 
 ## 验证与已知限制
 
-真实 MMDB 读写由合成 fixture 验证，覆盖 IPv4/IPv6、语言 fallback、未知 IP、损坏更新/恢复、过期以及并发切换。HTTP 检查 CCH validator 关键字段与 UI 数组/数值字段，覆盖鉴权、非公网 IP、无数据库。threat 测试含名单格式、缓存恢复/过期、Tor 不等于攻击、Abuse 429/401/超时/错 IP/非法分数/redirect、预算及并发合并。进程 smoke 验证 signal 生命周期；Docker runtime smoke 验证 UID、volume 权限、health 与 HTTPS CA。
+真实 MMDB 读写由合成 fixture 验证，覆盖 IPv4/IPv6、语言 fallback、未知 IP、损坏更新/恢复、过期以及并发切换。HTTP 检查 CCH validator 关键字段与 UI 数组/数值字段，覆盖鉴权、非公网 IP、无数据库。threat 测试含名单格式、缓存恢复/过期、Tor 不等于攻击、Abuse 429/401/超时/错 IP/非法分数/redirect、预算及并发合并。BLACKLIST 测试含本地优先、失败/重启限频、空名单替换、过期补漏与本地-only unknown。进程 smoke 验证 config 到 CCH 返回字段及 signal 生命周期；Docker runtime smoke 验证 UID、volume 权限、health 与 HTTPS CA。
 
 未测 gate 必须列于 docs/VALIDATION.md：官方账号下载、真实 AbuseIPDB、Oracle 部署与真实 CCH UI，不能用 mock 成功替代它们。GeoLite2 City + ASN 缺少人口、币种、公司、联系人和风险画像，无法与商业 IP intelligence 数据齐全等价。
 
 ## 变更历史
 
 2026-10-09：首版独立服务、官方 updater Compose、CCH-compatible API、local DROP/Tor 与 opt-in AbuseIPDB，加入 race / 进程 smoke / cross build / CI。
+
+2026-10-09：添加 AbuseIPDB BLACKLIST 本地优先、持久化尝试限频与 CHECK 独立开关；Compose 统一为 docker-compose.yml，补账户、运行和 Docker Hub 双架构发布文档。发布 workflow 仅 main 手动触发，完整 CI 成功后才发送 Docker Hub PAT；凭据由 GitHub secrets 输入，不在普通 push/PR 使用。
 
 质量复核接受项：`scripts/smoke.py` 与 `scripts/docker-smoke.py` 的 main 超过通用 50 行 heuristic；它是单次进程验收编排，统一 try/finally 保证子进程与临时目录清理，业务逻辑在 Go 包中。JSON/schema 常量与合成 fixture 的长行属于固定数据，不额外抽象。
 

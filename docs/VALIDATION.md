@@ -1,8 +1,24 @@
-# 首版验证记录
+# 验证记录
 
 时间：2026-10-09。源码、配置与测试在 `/home/zhang/work/projects/cch-geoip`。未部署到 Oracle，也未修改既有 CCH。
 
-## 已执行
+## BLACKLIST 与发布配置增量验证
+
+2026-10-09，Go 1.26.9：
+
+- `make test vet smoke docker-smoke` 全部通过；race tests 中 threat 覆盖率 87.9%、config 96.7%，API / GeoIP 覆盖率保持 94.1% / 84.9%。
+- BLACKLIST mock 验证 JSON/IP/分数/时间戳/重复记录校验、IPv6、合法空列表、并发合并下载、命中跳过 CHECK、未命中读缓存/在线补漏、过期排除、401/403/429/503/坏 JSON 保留有效旧快照。
+- 下载尝试在网络前落盘，测试失败后重启不重复请求、首次失败无数据快照的限频恢复、缓存写入失败不下载、redirect 不访问目标。
+- 新增 `scripts/blacklist-smoke.py`，启动真实 binary，验证 config→Restore→Service→CCH JSON 路径；新鲜名单输出 score/flags/blocklist/last_reported_at，过期不评分，CHECK 关闭后未命中为 unknown。使用合成名单和凭据，已有 Attempt 阻止在线下载，没有请求真实 AbuseIPDB。
+- Dockerfile 用已校验的本地 Go builder 构建成功；scratch/non-root/read-only-rootfs 中现有 Geo 查询与新增 BLACKLIST 缓存写入/恢复通过。宿主 Docker Hub builder 直连约束同首版，默认远端 builder 由 GitHub CI 验证。
+- ARM64 静态交叉编译通过，未新增 ARM64 真机验收。
+- `docker-compose.yml` 默认、local-only、镜像模式用合成凭据展开检查；`.env.example` 与服务配置对应，无真实密钥落盘。
+- `actionlint` 校验 CI reusable workflow 与 Docker Hub 手动发布 workflow 通过。Docker Hub PAT/username 未配置，本轮未发布 Docker Hub 镜像；发布后 manifest / pull / runtime 仍需验收。
+- `govulncheck`：No vulnerabilities found；模块、变更、静态安全和质量扫描通过。通用扫描仍有既有 smoke 编排函数长度警告，不替代执行测试。
+
+运行方式见 README；账户获取见 [ACCOUNTS.md](ACCOUNTS.md)，发布见 [DOCKERHUB.md](DOCKERHUB.md)。真实账号下载、真实 AbuseIPDB 到达性与 Oracle/CCH UI gate 仍未执行。
+
+## 首版已执行
 
 - Go 1.26.9（官方 archive SHA256 校验后使用）；`go test -race -cover ./...` 全部通过。
 - 核心包覆盖率：API 94.1%、config 96.5%、GeoIP 84.9%、threat 83.0%。主进程与 fixture CLI 由外部 smoke 验证，未计入 Go 单测覆盖率；整体覆盖率约 74%。

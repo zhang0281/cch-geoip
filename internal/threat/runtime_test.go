@@ -31,6 +31,15 @@ func TestRuntimeCachePermissions(t *testing.T) {
 	if f.feeds[0].updated.IsZero() {
 		t.Fatal("cache restore failed")
 	}
+	now := time.Now().UTC()
+	b := NewBlacklist("fixture-key", dir, 72*time.Hour)
+	if err := b.save(blacklistSnapshot{Attempt: now, Updated: now, Data: []byte(blacklistJSON(now, 95))}); err != nil {
+		t.Fatal("blacklist cache volume is not writable", err)
+	}
+	b.Restore()
+	if b.snapshot.Updated.IsZero() || len(b.entries) != 1 {
+		t.Fatal("blacklist cache restore failed")
+	}
 	pool, err := x509.SystemCertPool()
 	if err != nil || len(pool.Subjects()) == 0 {
 		t.Fatal("system CA certificates unavailable", err)

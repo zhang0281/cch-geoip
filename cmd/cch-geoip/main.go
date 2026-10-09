@@ -64,12 +64,19 @@ func run(logger *slog.Logger) error {
 	feeds := threat.NewFeeds(c.FeedsEnabled, c.FeedDir, c.FeedMaxAge)
 	feeds.Restore()
 	intel := &threat.Service{Feeds: feeds}
-	if c.AbuseEnabled {
+	if c.AbuseEnabled && c.AbuseCheckEnabled {
 		intel.Abuse = threat.NewAbuseIPDB(threat.AbuseOptions{Key: c.AbuseKey, Timeout: c.AbuseTimeout, CacheTTL: c.AbuseCacheTTL, DailyBudget: c.AbuseDailyBudget})
+	}
+	if c.AbuseEnabled && c.AbuseBlacklistEnabled {
+		intel.Blacklist = threat.NewBlacklist(c.AbuseKey, c.FeedDir, c.FeedMaxAge)
+		intel.Blacklist.Restore()
 	}
 	feedDone := make(chan struct{})
 	go func() {
 		defer close(feedDone)
+		if intel.Blacklist != nil {
+			intel.Blacklist.Refresh(ctx)
+		}
 		feeds.Refresh(ctx)
 		timer := time.NewTicker(c.FeedInterval)
 		defer timer.Stop()
@@ -78,6 +85,9 @@ func run(logger *slog.Logger) error {
 			case <-ctx.Done():
 				return
 			case <-timer.C:
+				if intel.Blacklist != nil {
+					intel.Blacklist.Refresh(ctx)
+				}
 				feeds.Refresh(ctx)
 			}
 		}

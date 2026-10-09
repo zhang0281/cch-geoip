@@ -1,7 +1,7 @@
 services:
   geoip:
     build: .
-    image: cch-geoip:local
+    image: ${CCH_GEOIP_IMAGE:-cch-geoip:local}
     restart: unless-stopped
     environment:
       GEOIP_LISTEN: 0.0.0.0:8080
@@ -13,6 +13,8 @@ services:
       THREAT_UPDATE_INTERVAL: 24h
       THREAT_MAX_AGE: 72h
       ABUSEIPDB_ENABLED: ${ABUSEIPDB_ENABLED:-false}
+      ABUSEIPDB_BLACKLIST_ENABLED: ${ABUSEIPDB_BLACKLIST_ENABLED:-true}
+      ABUSEIPDB_CHECK_ENABLED: ${ABUSEIPDB_CHECK_ENABLED:-true}
       ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
       ABUSEIPDB_DAILY_BUDGET: ${ABUSEIPDB_DAILY_BUDGET:-900}
       ABUSEIPDB_TIMEOUT: 500ms
@@ -21,7 +23,7 @@ services:
       - geoip-data:/usr/share/GeoIP:ro
       - threat-data:/var/lib/cch-geoip
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${GEOIP_HOST_PORT:-8080}:8080"
     read_only: true
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]

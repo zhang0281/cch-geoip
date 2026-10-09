@@ -15,6 +15,7 @@ type Config struct {
 	FeedDir, AbuseKey                                     string
 	FeedInterval, FeedMaxAge, AbuseTimeout, AbuseCacheTTL time.Duration
 	AbuseDailyBudget                                      int
+	AbuseBlacklistEnabled, AbuseCheckEnabled              bool
 }
 
 func Load() (Config, error) {
@@ -60,6 +61,14 @@ func loadThreat(c *Config) error {
 		return err
 	}
 	c.AbuseEnabled, err = boolean("ABUSEIPDB_ENABLED", false)
+	if err != nil {
+		return err
+	}
+	c.AbuseBlacklistEnabled, err = boolean("ABUSEIPDB_BLACKLIST_ENABLED", true)
+	if err != nil {
+		return err
+	}
+	c.AbuseCheckEnabled, err = boolean("ABUSEIPDB_CHECK_ENABLED", true)
 	if err != nil {
 		return err
 	}

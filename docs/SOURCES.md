@@ -6,6 +6,7 @@
 - [Spamhaus DROP](https://www.spamhaus.org/blocklists/do-not-route-or-peer/) 与 [条款](https://www.spamhaus.org/drop/terms/)。匹配源为 drop_v4.json / drop_v6.json，保留 ©、日期和条款文本；产品标注 The Spamhaus Project。每天下载一次。名单仅覆盖特定恶意网络，不是完整 IP 信誉库。
 - [Tor 官方出口列表](https://check.torproject.org/torbulkexitlist)。仅证明在下载时的出口名单中出现，不证明攻击或完整 Tor 网络覆盖。
 - [AbuseIPDB CHECK API](https://docs.abuseipdb.com/#check-endpoint) 与 [配额](https://docs.abuseipdb.com/#api-daily-rate-limits)。标准账户当前 CHECK 1000/日；项目预算默认 900。置信度/报告有时间范围，不等于未来行为概率。只读接口、maxAgeInDays=30，不请求 verbose，不调用 REPORT。
+- [AbuseIPDB BLACKLIST](https://docs.abuseipdb.com/#blacklist-endpoint)：标准账户当前 5 次/日，最多 10,000 条。使用 JSON 保留 generatedAt、abuseConfidenceScore、lastReportedAt；免费账户不依赖付费的自定义 confidenceMinimum。每 24 小时最多一次下载尝试，本地未命中不能证明安全。账户获取见 [ACCOUNTS.md](ACCOUNTS.md)。
 - [GeoIP Anonymous IP](https://dev.maxmind.com/geoip/docs/databases/anonymous-ip/) 是可选的付费 VPN/proxy 数据方向；本项目当前不实现，GeoLite2 不提供这些字段。
 - [CrowdSec CTI](https://docs.crowdsec.net/u/cti_api/intro/) 能提供行为上下文，但本轮不采用，避免将有限配额变成每个 GeoIP 请求的依赖。
 

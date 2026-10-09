@@ -10,6 +10,7 @@ type Source struct {
 	State                string     `json:"state"`
 	UpdatedAt            *time.Time `json:"updated_at,omitempty"`
 	PublishedAt          *time.Time `json:"published_at,omitempty"`
+	LastReportedAt       *time.Time `json:"last_reported_at,omitempty"`
 	Matched              bool       `json:"matched"`
 	AbuseConfidenceScore *int       `json:"abuse_confidence_score,omitempty"`
 	Error                string     `json:"error,omitempty"`
@@ -32,8 +33,9 @@ type Result struct {
 }
 
 type Service struct {
-	Feeds *Feeds
-	Abuse *AbuseIPDB
+	Feeds     *Feeds
+	Abuse     *AbuseIPDB
+	Blacklist *Blacklist
 }
 
 func (s *Service) Lookup(ctx context.Context, ip netip.Addr, now time.Time) Result {
@@ -44,12 +46,34 @@ func (s *Service) Lookup(ctx context.Context, ip netip.Addr, now time.Time) Resu
 	if s.Feeds != nil {
 		r = s.Feeds.Lookup(ip, now)
 	}
+	r.Sources["abuseipdb_blacklist"] = Source{State: "disabled"}
+	if s.Blacklist != nil {
+		local := s.Blacklist.Lookup(ip, now)
+		r.Sources["abuseipdb_blacklist"] = local.Source
+		if local.Source.State == "ready" && local.Source.Matched {
+			r.Sources["abuseipdb"] = local.Source
+			r.Sources["abuseipdb_check"] = Source{State: "skipped"}
+			r.Blocklists = append(r.Blocklists, Evidence{Name: "AbuseIPDB BLACKLIST", Category: "abuse"})
+			applyAbuse(&r, local)
+			return r
+		}
+	}
 	if s.Abuse == nil {
 		r.Sources["abuseipdb"] = Source{State: "disabled"}
+		if s.Blacklist != nil {
+			r.Sources["abuseipdb"] = Source{State: "unavailable", Error: "no local match; CHECK disabled"}
+		}
+		r.Sources["abuseipdb_check"] = Source{State: "disabled"}
 		return r
 	}
 	a := s.Abuse.Lookup(ctx, ip, now)
 	r.Sources["abuseipdb"] = a.Source
+	r.Sources["abuseipdb_check"] = a.Source
+	applyAbuse(&r, a)
+	return r
+}
+
+func applyAbuse(r *Result, a AbuseResult) {
 	if a.Source.State == "ready" {
 		score := float64(a.Score) / 100
 		if score > r.Score {
@@ -62,7 +86,6 @@ func (s *Service) Lookup(ctx context.Context, ip netip.Addr, now time.Time) Resu
 			r.IsThreat = true
 		}
 	}
-	return r
 }
 
 func riskLevel(score float64) string {
