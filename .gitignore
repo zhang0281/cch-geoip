@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+/data/
+/secrets/
+/bin/
+/artifacts/
+/coverage.out
+*.mmdb
+.code-abyss/

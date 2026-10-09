@@ -1,0 +1,49 @@
+services:
+  geoip:
+    build: .
+    image: cch-geoip:local
+    restart: unless-stopped
+    environment:
+      GEOIP_LISTEN: 0.0.0.0:8080
+      GEOIP_API_TOKEN: ${GEOIP_API_TOKEN:-}
+      GEOIP_RELOAD_INTERVAL: 1m
+      GEOIP_MAX_DB_AGE: 720h
+      THREAT_FEEDS_ENABLED: ${THREAT_FEEDS_ENABLED:-true}
+      THREAT_CACHE_DIR: /var/lib/cch-geoip
+      THREAT_UPDATE_INTERVAL: 24h
+      THREAT_MAX_AGE: 72h
+      ABUSEIPDB_ENABLED: ${ABUSEIPDB_ENABLED:-false}
+      ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
+      ABUSEIPDB_DAILY_BUDGET: ${ABUSEIPDB_DAILY_BUDGET:-900}
+      ABUSEIPDB_TIMEOUT: 500ms
+      ABUSEIPDB_CACHE_TTL: 6h
+    volumes:
+      - geoip-data:/usr/share/GeoIP:ro
+      - threat-data:/var/lib/cch-geoip
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    pids_limit: 64
+    networks: [geoip]
+  geoipupdate:
+    image: ghcr.io/maxmind/geoipupdate:v8.0.0
+    restart: unless-stopped
+    environment:
+      GEOIPUPDATE_ACCOUNT_ID: ${MAXMIND_ACCOUNT_ID:?Set MAXMIND_ACCOUNT_ID in .env}
+      GEOIPUPDATE_LICENSE_KEY: ${MAXMIND_LICENSE_KEY:?Set MAXMIND_LICENSE_KEY in .env}
+      GEOIPUPDATE_EDITION_IDS: GeoLite2-City GeoLite2-ASN
+      GEOIPUPDATE_FREQUENCY: "24"
+      GEOIPUPDATE_PRESERVE_FILE_TIMES: "1"
+    volumes:
+      - geoip-data:/usr/share/GeoIP
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [geoip]
+volumes:
+  geoip-data:
+  threat-data:
+networks:
+  geoip:
