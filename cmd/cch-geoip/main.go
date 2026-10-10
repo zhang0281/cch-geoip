@@ -15,6 +15,7 @@ import (
 	"github.com/zhang0281/cch-geoip/internal/config"
 	"github.com/zhang0281/cch-geoip/internal/geoip"
 	"github.com/zhang0281/cch-geoip/internal/ip2region"
+	"github.com/zhang0281/cch-geoip/internal/onlinegeo"
 	"github.com/zhang0281/cch-geoip/internal/threat"
 )
 
@@ -122,17 +123,38 @@ func run(logger *slog.Logger) error {
 	if region != nil {
 		regionBackend = region
 	}
-	srv := &http.Server{Addr: c.Listen, Handler: api.NewHandlerWithRegion(store, regionBackend, intel, c.Token, logger),
+	var onlineBackend api.OnlineBackend
+	var onlineService *onlinegeo.Service
+	if c.OnlineEnabled {
+		online, err := onlinegeo.New(onlinegeo.Options{IPAPIKey: c.OnlineKey, CacheDir: c.OnlineCacheDir,
+			CacheTTL: c.OnlineCacheTTL, Timeout: c.OnlineTimeout,
+			IPAPIDailyBudget: c.OnlineIPAPIBudget, IPWhoDailyBudget: c.OnlineIPWhoBudget})
+		if err != nil {
+			logger.Warn("online geo state unavailable; using offline databases")
+		} else {
+			onlineService = online
+			onlineBackend = online
+		}
+	}
+	srv := &http.Server{Addr: c.Listen, Handler: api.NewHandlerWithOnline(store, regionBackend, onlineBackend, intel, c.Token, logger),
 		ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second,
 		IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
 	result := make(chan error, 1)
 	go func() { result <- srv.ListenAndServe() }()
 	logger.Info("listening", "address", c.Listen, "authentication_enabled", c.Token != "")
+	cacheTicker := time.NewTicker(time.Minute)
+	defer cacheTicker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			reload()
 			regionReload()
+		case <-cacheTicker.C:
+			if onlineService != nil {
+				if err := onlineService.Maintain(time.Now()); err != nil {
+					logger.Warn("online geo cache cleanup failed; new provider requests disabled")
+				}
+			}
 		case <-hup:
 			reload()
 			regionReload()

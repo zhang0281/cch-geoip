@@ -13,3 +13,5 @@
 - [CrowdSec CTI](https://docs.crowdsec.net/u/cti_api/intro/) 能提供行为上下文，但本轮不采用，避免将有限配额变成每个 GeoIP 请求的依赖。
 
 所有测试 MMDB 均为项目生成的合成数据；仓库不再分发真实 GeoLite2 数据。第三方库的许可证以其各自 LICENSE 为准。
+
+- 国外在线 Geo（2026-10-10核对）：[ipapi.is API](https://ipapi.is/developers.html)、[条款](https://ipapi.is/terms.html)，注册免费账户1000次/日、完整响应、缓存最多30天、内部用途；匿名接口格式和额度不作为本项目依赖。[ipwho.is](https://ipwhois.io/documentation) 免费HTTPS、IPv4/IPv6、1000次/日/出口IP，省市坐标与时区；不采用付费security数据。各provider可调整免费政策，本项目预算/退避不是上游额度保证。

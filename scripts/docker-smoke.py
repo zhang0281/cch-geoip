@@ -92,6 +92,13 @@ def main():
                             "-e", "CCH_TEST_CACHE_DIR=/var/lib/cch-geoip",
                             "--entrypoint", "/runtime-test", IMAGE,
                             "-test.run=TestRuntimeCachePermissions", "-test.v"], check=True)
+            subprocess.run(["docker", "run", "--rm", "--read-only", "--cap-drop=ALL",
+                            "--security-opt=no-new-privileges:true",
+                            "-v", f"{volume}:/var/lib/cch-geoip",
+                            "-v", f"{ROOT}/bin/onlinegeo.test:/runtime-test:ro",
+                            "-e", "CCH_TEST_CACHE_DIR=/var/lib/cch-geoip",
+                            "--entrypoint", "/runtime-test", IMAGE,
+                            "-test.run=TestRuntimeOnlineStatePermissions", "-test.v"], check=True)
             run("docker", "stop", "-t", "10", name)
             assert json.loads(run("docker", "inspect", name))[0]["State"]["ExitCode"] == 0
         finally:

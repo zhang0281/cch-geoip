@@ -2,6 +2,16 @@
 
 源码、配置与测试在 `/home/zhang/work/projects/cch-geoip`。首版历史记录保留于下方；2026-10-09 的 0.2.0 已部署 Oracle，真实数据库/AbuseIPDB 可用，CCH 已切到本地服务。
 
+## 国外免费在线优先（2026-10-10，0.4.0）
+
+- Go1.26.9 `make test vet smoke`、完整Docker build与`make docker-smoke`通过；API覆盖94.7%，config97.6%，onlinegeo89.9%，真实内置ip2region reader88.8%。
+- 国内未命中回退、国内有效xdb可独立服务、国家冲突不混合地域、国外缓存/在线成功救援陈旧或坏MMDB、鉴权与非公网地址拒绝均已验证。
+- provider httptest验证POST-body Key、不跟随redirect、同IP并发合并、请求预留额度落盘、滚动24h预算、429/cooldown、短超时备用、错IP/非法地理字段/超长响应、缓存恢复及空闲过期清理。真实API Key未用于本地测试。
+- scratch/non-root/read-only-rootfs实际执行在线provider模拟查询和0600缓存/预算保存恢复；原有本地MMDB、tzdata、systemCA、health、SIGTERM与BLACKLIST gate保留通过。
+- ARM64静态binary已构建；真实Oracle runtime、CCH容器内部链路和GHCR0.4.0发布仍由部署步骤分别验收，不能由crossbuild代替。
+- 独立review已复现并修复3处API故障回退问题：缺失MMDB不应阻断有效CNxdb，冲突国家不应屏蔽CNxdb，一般MMDB错误也不应阻断国外在线/缓存结果。
+- 新模块文档、配置示例、Compose合成凭据验证、本地Markdown链接、变更/安全/质量扫描通过。源码与mock通过不证明实际地理精度提升，需已知位置样本。
+
 ## ip2region 增量验证（2026-10-10）
 
 - `make test vet smoke` 通过；功能关闭时旧查询路径正常，无 typed nil RegionBackend panic。

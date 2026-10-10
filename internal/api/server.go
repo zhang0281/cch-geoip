@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -12,8 +13,10 @@ import (
 	"strings"
 	"time"
 
+	geo "github.com/oschwald/geoip2-golang"
 	"github.com/zhang0281/cch-geoip/internal/geoip"
 	"github.com/zhang0281/cch-geoip/internal/ip2region"
+	"github.com/zhang0281/cch-geoip/internal/onlinegeo"
 	"github.com/zhang0281/cch-geoip/internal/threat"
 )
 
@@ -26,11 +29,19 @@ type RegionBackend interface {
 	Lookup(netip.Addr) (ip2region.Record, error)
 }
 
+type OnlineBackend interface {
+	Lookup(context.Context, netip.Addr, time.Time) onlinegeo.Result
+}
+
 func NewHandler(store Backend, intel *threat.Service, token string, logger *slog.Logger) http.Handler {
 	return NewHandlerWithRegion(store, nil, intel, token, logger)
 }
 
 func NewHandlerWithRegion(store Backend, region RegionBackend, intel *threat.Service, token string, logger *slog.Logger) http.Handler {
+	return NewHandlerWithOnline(store, region, nil, intel, token, logger)
+}
+
+func NewHandlerWithOnline(store Backend, region RegionBackend, online OnlineBackend, intel *threat.Service, token string, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { write(w, 200, object{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
@@ -64,20 +75,30 @@ func NewHandlerWithRegion(store Backend, region RegionBackend, intel *threat.Ser
 		}
 		now := time.Now()
 		record, err := store.Lookup(net.IP(ip.AsSlice()), now)
-		if errors.Is(err, geoip.ErrNotReady) {
-			write(w, 503, object{"error": "databases unavailable or stale"})
-			return
-		}
 		if err != nil {
-			logger.Error("database lookup failed")
-			write(w, 500, object{"error": "database lookup failed"})
-			return
+			record = geoip.Record{City: &geo.City{}, ASN: &geo.ASN{}}
 		}
 		var locality ip2region.Record
 		if region != nil {
 			locality, _ = region.Lookup(ip)
 		}
+		domestic := record.City.Country.IsoCode == "CN" || (locality.Found && locality.CountryCode == "CN")
+		var result onlinegeo.Result
+		if online != nil && !domestic {
+			result = online.Lookup(r.Context(), ip, now)
+		}
+		primaryDomestic := locality.Found && locality.CountryCode == "CN" && locality.Country == "中国" && (locality.Province != "" || locality.City != "")
+		if err != nil && result.Location == nil && !primaryDomestic {
+			if errors.Is(err, geoip.ErrNotReady) {
+				write(w, 503, object{"error": "databases unavailable or stale"})
+			} else {
+				logger.Error("database lookup failed")
+				write(w, 500, object{"error": "database lookup failed"})
+			}
+			return
+		}
 		data := responseWithRegion(ip, lang, record, locality, now)
+		applyOnlineGeo(data, result, domestic, online != nil, now)
 		applyThreat(data, intel.Lookup(r.Context(), ip, now))
 		write(w, 200, data)
 	})

@@ -13,6 +13,7 @@ smoke: build
 	python3 scripts/blacklist-smoke.py
 docker-smoke: smoke
 	CGO_ENABLED=0 go test -c -o bin/threat.test ./internal/threat
+	CGO_ENABLED=0 go test -c -o bin/onlinegeo.test ./internal/onlinegeo
 	python3 scripts/docker-smoke.py
 	python3 scripts/ip2region-smoke.py
 ip2region-smoke:

@@ -1,8 +1,8 @@
 # cch-geoip
 
-为 Claude Code Hub (CCH) 提供兼容的 IP 归属地接口。日常查询直接读取本地 GeoLite2 City + ASN 数据库，不依赖外部 GeoIP API。官方 `geoipupdate` 容器定期更新数据库，本服务自动重新加载。
+为 Claude Code Hub (CCH) 提供兼容的 IP 归属地接口。国内省市使用 ip2region；国外优先查询免费在线 API，并以本地 GeoLite2 City + ASN 托底。官方 `geoipupdate` 容器定期更新数据库，本服务自动重新加载。
 
-镜像另内置 ip2region v3.18.0 的 IPv4 / IPv6 xdb。国内省份、城市、ISP 优先采用 ip2region；GeoLite2 保留国家、ASN 与全球 fallback。开启后不需要额外账号或在线 API。
+镜像另内置 ip2region v3.18.0 的 IPv4 / IPv6 xdb。国内省份、城市、ISP 优先采用 ip2region；GeoLite2 保留 ASN 与离线 fallback。国内 ip2region 查询不需要额外账号或在线 API。
 
 可选 threat 增强：Spamhaus DROP IPv4/IPv6 网段、Tor 官方出口名单，以及显式启用的 AbuseIPDB。本地 AbuseIPDB 黑名单优先，未命中才使用缓存或免费账户 CHECK。它们不阻断地理信息查询，也不执行封禁。
 
@@ -27,7 +27,7 @@ docker compose logs --tail=50 geoipupdate geoip
 curl -f http://127.0.0.1:8080/readyz
 ```
 
-初次下载完成前 `/healthz` 为 200，`/readyz` 和查询接口为 503。数据库到位后默认一分钟内自动加载，也可 `docker compose kill -s HUP geoip` 立即检查。默认每 24 小时检查数据库更新；保留 `geoip-data` volume，升级时无需重下载已有数据库。不要用 `docker compose down -v` 升级。
+初次下载完成前 `/healthz` 为 200、`/readyz` 为 503；启用在线 Geo 时国外查询仍可成功，所有来源都不可用才返回 503。数据库到位后默认一分钟内自动加载，也可 `docker compose kill -s HUP geoip` 立即检查。默认每 24 小时检查数据库更新；保留 `geoip-data` volume，升级时无需重下载已有数据库。不要用 `docker compose down -v` 升级。
 
 ```sh
 curl 'http://127.0.0.1:8080/v1/ip2location/8.8.8.8?lang=zh-CN'
@@ -63,7 +63,7 @@ THREAT_FEEDS_ENABLED=true THREAT_CACHE_DIR=/absolute/path/writable-cache \
 ./bin/cch-geoip
 ```
 
-默认监听 `127.0.0.1:8080`；Ctrl+C / SIGTERM 正常退出，SIGHUP 检查数据库更新。binary 不自动读取 `.env`，需要由进程环境传入配置；开启 AbuseIPDB 时建议使用 `ABUSEIPDB_API_KEY_FILE`。Geo 数据库下载仍由外部 updater 管理，不在请求路径上在线补查。
+默认监听 `127.0.0.1:8080`；Ctrl+C / SIGTERM 正常退出，SIGHUP 检查数据库更新。binary 不自动读取 `.env`，需要由进程环境传入配置；开启 AbuseIPDB 时建议使用 `ABUSEIPDB_API_KEY_FILE`。Geo 数据库下载仍由外部 updater 管理，原生 binary 默认关闭在线 Geo；需要时设置 `ONLINE_GEO_ENABLED=true` 并提供可写的 `ONLINE_GEO_CACHE_DIR`。
 
 ## 接入 CCH
 
@@ -72,7 +72,7 @@ CCH 的 `IP_GEO_API_URL` 是 base URL，不能带 `/v1/ip2location` 后缀。将
 ```dotenv
 IP_GEO_API_URL=http://geoip:8080
 IP_GEO_API_TOKEN=<与 GEOIP_API_TOKEN 相同的值>
-IP_GEO_TIMEOUT_MS=1500
+IP_GEO_TIMEOUT_MS=3500
 ```
 
 默认网络名称为 `<本项目 Compose project name>_geoip`。用 `docker network ls` 确认，再在 CCH Compose 中将它声明为 `external: true` 并加入 app 的 `networks`；保留 app 原有数据库/Redis 网络。修改环境变量后重新创建 CCH app。容器内的 `127.0.0.1` 指容器自身，不能用它连接另一个容器。
@@ -81,11 +81,32 @@ IP_GEO_TIMEOUT_MS=1500
 
 ## ip2region 地域与运营商
 
-Docker 镜像及 Compose 默认开启 `IP2REGION_ENABLED=true`；原生 binary 默认关闭。国内记录且 GeoLite2 国家也为 CN 时，优先使用 ip2region 的省／市／ISP；国外、未命中、功能关闭或 xdb 不可用时保留 GeoLite2。ASN 与注册组织仍来自 GeoLite2 ASN，ISP 单独放在 `connection.isp`；移动／联通／电信／广电名称映射到 CCH `carrier.name`，MCC/MNC 保持未知。这不证明当前连接一定是手机网络。
+Docker 镜像及 Compose 默认开启 `IP2REGION_ENABLED=true`；原生 binary 默认关闭。ip2region 返回有效 CN 地域时，优先使用其国家／省／市／ISP，GeoLite2 不可用也可返回国内省市；国内未命中、功能关闭或 xdb 不可用时使用 GeoLite2；国外使用下一节的在线优先策略。ASN 与注册组织仍来自 GeoLite2 ASN，ISP 单独放在 `connection.isp`；移动／联通／电信／广电名称映射到 CCH `carrier.name`，MCC/MNC 保持未知。这不证明当前连接一定是手机网络。
 
-国内 ip2region 地域生效时不拼接 GeoLite2 的另一城市坐标或邮编：坐标使用 CCH 支持的 `0,0 / accuracy_radius=null` 未知占位，不显示地图；时区仍来源于 GeoLite2。`_meta.ip2region` 和 `location_source` 保留实际来源、版本与匹配状态。国内省市名称为中文，不额外推断英文译名。
+国内 ip2region 地域生效时不拼接 GeoLite2 的另一城市坐标或邮编：坐标使用 CCH 支持的 `0,0 / accuracy_radius=null` 未知占位，不显示地图；GeoLite2 同为 CN 时保留其时区，否则采用 `Asia/Shanghai` 国家默认值并标明来源。`_meta.ip2region` 和 `location_source` 保留实际来源、版本与匹配状态。国内省市名称为中文，不额外推断英文译名。
 
 Dockerfile 从官方固定 release 下载 xdb，并用 SHA256 校验，许可证随镜像附带；47 MiB 数据不提交 Git。免费数据不定期更新：升级 xdb 需要同步改 Dockerfile 版本/校验和、配置默认版本与测试，然后发布新镜像，不会在请求期间自动下载。挂载自有数据库时设置 `IP2REGION_V4_DB` / `IP2REGION_V6_DB`，通过原子 rename 替换，再发 SIGHUP；损坏更新保留上次有效 reader。
+
+## 国外在线 Geo 与离线回退
+
+Compose 默认开启 `ONLINE_GEO_ENABLED=true`，原生 binary 默认关闭。国内 IP 不发送给这两个 Geo API；ip2region 返回有效 CN 地域时优先使用它，国内未命中使用 GeoLite2。任一本地来源认定为 CN 时都会跳过在线 Geo，以避免国内请求外发；来源冲突时以有效国内 ip2region 地域为准，并清除 MaxMind 的其他国家坐标/邮编。
+
+国外查询顺序：有效缓存 → ipapi.is 免费账户 → ipwho.is 免费接口 → GeoLite2。ipapi.is 未配置 Key 时跳过，ipwho.is 无需注册。在线省市、国家、邮编、坐标及时区来自同一个 provider；ASN 仍来自本地 MMDB。在线名称为英文，`lang=zh-CN` 不会凭空生成翻译。未提供精度半径时 `accuracy_radius_km=null`，可信度等级单独保存在 `_meta.location_accuracy`，不转换成公里数。在线 Geo 不更改现有 threat/privacy 策略。
+
+```dotenv
+ONLINE_GEO_ENABLED=true
+IPAPI_IS_API_KEY=your_free_account_key
+ONLINE_GEO_CACHE_TTL=24h
+ONLINE_GEO_TIMEOUT=2s
+IPAPI_IS_DAILY_BUDGET=900
+IPWHO_IS_DAILY_BUDGET=900
+```
+
+缓存及每次请求前保存的额度记录位于已有 writable volume 的 `/var/lib/cch-geoip/online`；保留 volume 可跨重启复用。每个 provider 默认滚动 24 小时最多 900 次尝试，失败也计额；同 IP 并发合并。429、网络失败或配额用尽自动跳过该 provider。只配置免费账户，不购买 credits、不调用付费功能。多个副本或其他程序的消耗无法由本实例统一计数，须自行留余量。
+
+默认在线总等待最多 2 秒，每个 provider 最多使用一半。若启用 AbuseIPDB CHECK，还可能增加 500 ms；CCH 的 `IP_GEO_TIMEOUT_MS` 建议至少 3500。若 CCH 保持 1500 ms，可将 `ONLINE_GEO_TIMEOUT=900ms`，代价是网络较慢时更容易回退。缓存损坏或无法写入时停用在线模块，保留离线服务；不要删除额度文件以重置限额。
+
+`_meta.online_geo` 提供 provider 状态、缓存命中、实际来源和更新时间。`ONLINE_GEO_ENABLED=false` 可恢复全部离线。账户与许可条件见 [ACCOUNTS.md](docs/ACCOUNTS.md)。在线请求会把被查询的国外 IP 发给所选提供方，缓存也会保存这些 IP；无需将它们写入业务日志。
 
 ## threat 与 privacy
 
@@ -120,6 +141,12 @@ Compose 默认启用本地名单，原生二进制默认关闭，需 `THREAT_FEE
 | `IP2REGION_DATA_DIR` | `/usr/share/ip2region` | version 子目录的根目录 |
 | `IP2REGION_V4_DB` / `IP2REGION_V6_DB` | `<DATA_DIR>/<VERSION>/ip2region_v4.xdb` / `ip2region_v6.xdb` | 自定义 IPv4/IPv6 xdb 路径 |
 | `THREAT_FEEDS_ENABLED` | `false`；Compose 为 `true` | 是否下载并匹配本地名单 |
+| `ONLINE_GEO_ENABLED` | 原生 `false`；Compose `true` | 国外免费在线 Geo |
+| `ONLINE_GEO_CACHE_DIR` | `/var/lib/cch-geoip/online` | writable 持久缓存与额度 |
+| `ONLINE_GEO_CACHE_TTL` | `24h` | 允许 `1h`–`168h` |
+| `ONLINE_GEO_TIMEOUT` | `2s` | 在线总时限，正数且不超过 2s |
+| `IPAPI_IS_API_KEY` / `IPAPI_IS_API_KEY_FILE` | 未设置 | 免费账户 Key；缺失跳过，二者互斥 |
+| `IPAPI_IS_DAILY_BUDGET` / `IPWHO_IS_DAILY_BUDGET` | `900` | 每 provider 滚动 24h 次数，范围 1–1000 |
 | `THREAT_CACHE_DIR` | 空；Compose 为 `/var/lib/cch-geoip` | 空值时只保存在内存 |
 | `THREAT_UPDATE_INTERVAL` | `24h` | 至少 24h |
 | `THREAT_MAX_AGE` | `72h` | 过期名单停止参与匹配 |
@@ -156,3 +183,5 @@ Dockerfile 用 BuildKit 的 TARGETARCH 支持 AMD64 / ARM64。`docker buildx bui
 ip2region 集成测试使用官方固定 xdb，单元测试不自动联网；未提供 xdb 时 reader 集成用例会 skip，`make docker-smoke` 会从镜像提取并强制执行该用例，CI 同样执行。
 
 参阅 [DESIGN.md](DESIGN.md)、[验证记录](docs/VALIDATION.md) 和 [数据来源说明](docs/SOURCES.md)。
+
+在线服务运行时独立每分钟清理过期缓存，即使没有新请求也会落盘删除；停服时不执行清理。维护原子状态时保留未过期额度记录。

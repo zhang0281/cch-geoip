@@ -20,6 +20,10 @@ type Config struct {
 	AbuseDailyBudget                                      int
 	AbuseBlacklistEnabled, AbuseCheckEnabled              bool
 	RegionEnabled                                         bool
+	OnlineEnabled                                         bool
+	OnlineKey, OnlineCacheDir                             string
+	OnlineTimeout, OnlineCacheTTL                         time.Duration
+	OnlineIPAPIBudget, OnlineIPWhoBudget                  int
 }
 
 func Load() (Config, error) {
@@ -62,6 +66,9 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("API token must not contain whitespace")
 	}
 	if err = loadThreat(&c); err != nil {
+		return c, err
+	}
+	if err = loadOnline(&c); err != nil {
 		return c, err
 	}
 	return c, nil

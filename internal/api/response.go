@@ -70,10 +70,23 @@ func response(ip netip.Addr, lang string, r geoip.Record, now time.Time) object 
 func responseWithRegion(ip netip.Addr, lang string, r geoip.Record, region ip2region.Record, now time.Time) object {
 	c, a := r.City, r.ASN
 	code := strings.ToUpper(c.Country.IsoCode)
+	regionMatch := region.Found && region.CountryCode == "CN" && region.Country == "中国"
+	useIP2RegionLocality := regionMatch && (region.Province != "" || region.City != "")
+	useIP2RegionISP := regionMatch && region.ISP != ""
+	zoneID, zoneSource := c.Location.TimeZone, "maxmind"
+	continent := object{"code": c.Continent.Code, "name": localized(c.Continent.Names, lang)}
+	name := localized(c.Country.Names, lang)
+	if useIP2RegionLocality {
+		if code != "CN" || zoneID == "" {
+			zoneID, zoneSource = "Asia/Shanghai", "iana-country-default"
+		}
+		code = "CN"
+		name = localized(map[string]string{"en": "China", "zh-CN": "中国"}, lang)
+		continent = object{"code": "AS", "name": localized(map[string]string{"en": "Asia", "zh-CN": "亚洲"}, lang)}
+	}
 	if code == "" {
 		code = "ZZ"
 	}
-	name := localized(c.Country.Names, lang)
 	if name == "" {
 		name = "Unknown"
 	}
@@ -81,14 +94,14 @@ func responseWithRegion(ip netip.Addr, lang string, r geoip.Record, region ip2re
 		"calling_code": "+0", "tld": ".unknown", "area_km2": 0, "population": 0,
 		"borders": []string{}, "is_eu_member": c.Country.IsInEuropeanUnion, "flag": flag(code),
 		"languages": []any{}, "currencies": []any{}}
+	if useIP2RegionLocality {
+		country["is_eu_member"] = false
+	}
 	var regionValue any
 	if len(c.Subdivisions) > 0 {
 		s := c.Subdivisions[0]
 		regionValue = object{"code": s.IsoCode, "name": localized(s.Names, lang), "type": "maxmind"}
 	}
-	regionMatch := region.Found && region.CountryCode == "CN" && region.Country == "中国" && code == "CN"
-	useIP2RegionLocality := regionMatch && (region.Province != "" || region.City != "")
-	useIP2RegionISP := regionMatch && region.ISP != ""
 	if useIP2RegionLocality {
 		regionValue = nil
 		if region.Province != "" {
@@ -139,10 +152,10 @@ func responseWithRegion(ip netip.Addr, lang string, r geoip.Record, region ip2re
 	}
 	return object{
 		"ip": ip.String(), "version": version, "hostname": nil,
-		"location": object{"continent": object{"code": c.Continent.Code, "name": localized(c.Continent.Names, lang)},
+		"location": object{"continent": continent,
 			"country": country, "region": regionValue, "city": city,
 			"postal_code": postalCode, "coordinates": coordinates},
-		"timezone": timezone(c.Location.TimeZone, now),
+		"timezone": timezone(zoneID, now),
 		"connection": object{"asn": asn, "handle": nil, "organization": org, "isp": nullable(usedISP(useIP2RegionISP, region.ISP)),
 			"domain": nil, "route": nil, "rir": "UNKNOWN", "type": "unknown", "subtype": nil,
 			"scope": "public", "is_anycast": false},
@@ -151,7 +164,7 @@ func responseWithRegion(ip netip.Addr, lang string, r geoip.Record, region ip2re
 		"threat": object{"is_abuser": false, "is_attacker": false, "is_crawler": false, "is_threat": false,
 			"score": 0, "risk_level": "none", "blocklists": []any{}}, "abuse": nil,
 		"_meta": object{"source": "MaxMind GeoLite2 / GeoIP2 City + GeoLite2 ASN", "language": lang,
-			"location_source":       map[string]any{"country": "maxmind", "region": sourceName(useIP2RegionLocality), "city": sourceName(useIP2RegionLocality), "isp": sourceName(useIP2RegionISP), "coordinates": coordinateSource(useIP2RegionLocality)},
+			"location_source":       map[string]any{"country": sourceName(useIP2RegionLocality), "region": sourceName(useIP2RegionLocality), "city": sourceName(useIP2RegionLocality), "isp": sourceName(useIP2RegionISP), "coordinates": coordinateSource(useIP2RegionLocality), "timezone": zoneSource},
 			"ip2region":             object{"state": regionState(region.Available), "version": region.Version, "matched": regionMatch, "country": nullable(region.Country), "province": nullable(region.Province), "city": nullable(region.City), "isp": nullable(region.ISP), "country_code": nullable(region.CountryCode)},
 			"unsupported":           unsupported,
 			"warning":               "Privacy/threat flags are compatibility placeholders, not verified negatives; CCH currently ignores this metadata.",
