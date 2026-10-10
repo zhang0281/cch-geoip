@@ -126,9 +126,9 @@ func run(logger *slog.Logger) error {
 	var onlineBackend api.OnlineBackend
 	var onlineService *onlinegeo.Service
 	if c.OnlineEnabled {
-		online, err := onlinegeo.New(onlinegeo.Options{IPAPIKey: c.OnlineKey, CacheDir: c.OnlineCacheDir,
+		online, err := onlinegeo.New(onlinegeo.Options{CacheDir: c.OnlineCacheDir,
 			CacheTTL: c.OnlineCacheTTL, Timeout: c.OnlineTimeout,
-			IPAPIDailyBudget: c.OnlineIPAPIBudget, IPWhoDailyBudget: c.OnlineIPWhoBudget})
+			IPSBDailyBudget: c.OnlineIPSBBudget, IPWhoDailyBudget: c.OnlineIPWhoBudget, GeoJSDailyBudget: c.OnlineGeoJSBudget})
 		if err != nil {
 			logger.Warn("online geo state unavailable; using offline databases")
 		} else {

@@ -44,6 +44,9 @@ func applyOnlineGeo(data object, result onlinegeo.Result, domestic, enabled bool
 	available := l.Latitude != nil && l.Longitude != nil
 	if available {
 		coords["latitude"], coords["longitude"] = *l.Latitude, *l.Longitude
+		if l.AccuracyRadiusKM != nil {
+			coords["accuracy_radius_km"] = *l.AccuracyRadiusKM
+		}
 	}
 	location["coordinates"] = coords
 	data["timezone"] = timezone(l.Timezone, now)

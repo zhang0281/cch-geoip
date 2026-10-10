@@ -1,7 +1,6 @@
 package onlinegeo
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -17,24 +16,16 @@ import (
 const maxResponseBytes = 128 << 10
 
 func (s *Service) fetch(ctx context.Context, provider string, ip netip.Addr, now time.Time) (*Location, string, time.Time) {
-	method, url := http.MethodGet, s.endpoints[provider]+"/"+ip.String()
-	var body io.Reader
-	if provider == ipapi {
-		method, url = http.MethodPost, s.endpoints[provider]
-		payload, _ := json.Marshal(struct {
-			Q   string `json:"q"`
-			Key string `json:"key"`
-		}{ip.String(), s.options.IPAPIKey})
-		body = bytes.NewReader(payload)
+	url := s.endpoints[provider] + "/" + ip.String()
+	if provider == geojs {
+		url += ".json"
 	}
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "unavailable", now.Add(time.Minute)
 	}
 	req.Header.Set("Accept", "application/json")
-	if provider == ipapi {
-		req.Header.Set("Content-Type", "application/json")
-	}
+	req.Header.Set("User-Agent", "cch-geoip/0.5.0")
 	res, err := s.client.Do(req)
 	if err != nil {
 		return nil, "unavailable", now.Add(time.Minute)
@@ -56,7 +47,7 @@ func (s *Service) fetch(ctx context.Context, provider string, ip netip.Addr, now
 	}
 	location, ok := parseLocation(provider, b, ip)
 	if !ok {
-		return nil, "invalid_response", now.Add(time.Minute)
+		return nil, "invalid_response", time.Time{}
 	}
 	return location, "ready", time.Time{}
 }
@@ -80,40 +71,61 @@ func retryAfter(value string, now time.Time) time.Time {
 func parseLocation(provider string, b []byte, ip netip.Addr) (*Location, bool) {
 	var address string
 	var l Location
-	if provider == ipapi {
+	if provider == ipsb {
 		var payload struct {
-			IP       string          `json:"ip"`
-			Error    json.RawMessage `json:"error"`
-			IsBogon  bool            `json:"is_bogon"`
-			Location struct {
-				CountryCode   string   `json:"country_code"`
-				Country       string   `json:"country"`
-				ContinentCode string   `json:"continent_code"`
-				Continent     string   `json:"continent"`
-				State         string   `json:"state"`
-				StateCode     string   `json:"state_code"`
-				City          string   `json:"city"`
-				Zip           string   `json:"zip"`
-				Timezone      string   `json:"timezone"`
-				Accuracy      string   `json:"accuracy"`
-				Latitude      *float64 `json:"latitude"`
-				Longitude     *float64 `json:"longitude"`
-			} `json:"location"`
+			IP            string   `json:"ip"`
+			CountryCode   string   `json:"country_code"`
+			Country       string   `json:"country"`
+			ContinentCode string   `json:"continent_code"`
+			Region        string   `json:"region"`
+			RegionCode    string   `json:"region_code"`
+			City          string   `json:"city"`
+			Postal        string   `json:"postal_code"`
+			Timezone      string   `json:"timezone"`
+			Latitude      *float64 `json:"latitude"`
+			Longitude     *float64 `json:"longitude"`
 		}
-		if json.Unmarshal(b, &payload) != nil || payload.IsBogon ||
-			(len(payload.Error) > 0 && string(payload.Error) != "null" && string(payload.Error) != "false" && string(payload.Error) != "\"\"") {
+		if json.Unmarshal(b, &payload) != nil {
 			return nil, false
 		}
-		d := payload.Location
 		address = payload.IP
-		continentCode, continentName := d.ContinentCode, d.Continent
-		if name, ok := continentNames[d.Continent]; ok && (continentCode == "" || continentCode == d.Continent) {
-			continentCode, continentName = d.Continent, name
+		l = Location{CountryCode: payload.CountryCode, Country: payload.Country, ContinentCode: payload.ContinentCode, Continent: continentNames[payload.ContinentCode],
+			Region: payload.Region, RegionCode: payload.RegionCode, City: payload.City, Postal: payload.Postal, Timezone: payload.Timezone, Latitude: payload.Latitude, Longitude: payload.Longitude}
+	} else if provider == geojs {
+		var payload struct {
+			IP            string `json:"ip"`
+			CountryCode   string `json:"country_code"`
+			Country       string `json:"country"`
+			ContinentCode string `json:"continent_code"`
+			Region        string `json:"region"`
+			City          string `json:"city"`
+			Timezone      string `json:"timezone"`
+			Latitude      string `json:"latitude"`
+			Longitude     string `json:"longitude"`
+			Accuracy      *int   `json:"accuracy"`
 		}
-		l = Location{CountryCode: d.CountryCode, Country: d.Country, ContinentCode: d.ContinentCode, Continent: d.Continent,
-			Region: d.State, RegionCode: d.StateCode, City: d.City, Postal: d.Zip, Timezone: d.Timezone, Accuracy: d.Accuracy, Latitude: d.Latitude, Longitude: d.Longitude}
-		l.ContinentCode, l.Continent = continentCode, continentName
-	} else {
+		if json.Unmarshal(b, &payload) != nil {
+			return nil, false
+		}
+		address = payload.IP
+		l = Location{CountryCode: payload.CountryCode, Country: payload.Country, ContinentCode: payload.ContinentCode, Continent: continentNames[payload.ContinentCode],
+			Region: payload.Region, City: payload.City, Timezone: payload.Timezone}
+		if payload.Latitude != "" || payload.Longitude != "" {
+			lat, e1 := strconv.ParseFloat(payload.Latitude, 64)
+			lon, e2 := strconv.ParseFloat(payload.Longitude, 64)
+			if e1 != nil || e2 != nil {
+				return nil, false
+			}
+			l.Latitude, l.Longitude = &lat, &lon
+		}
+		if payload.Accuracy != nil {
+			if *payload.Accuracy <= 0 || *payload.Accuracy > 20000 || l.Latitude == nil {
+				return nil, false
+			}
+			accuracy := float64(*payload.Accuracy)
+			l.AccuracyRadiusKM = &accuracy
+		}
+	} else if provider == ipwho {
 		var payload struct {
 			IP            string   `json:"ip"`
 			Success       *bool    `json:"success"`
@@ -137,6 +149,8 @@ func parseLocation(provider string, b []byte, ip netip.Addr) (*Location, bool) {
 		address = payload.IP
 		l = Location{CountryCode: payload.CountryCode, Country: payload.Country, ContinentCode: payload.ContinentCode, Continent: payload.Continent,
 			Region: payload.Region, RegionCode: payload.RegionCode, City: payload.City, Postal: payload.Postal, Timezone: payload.Timezone.ID, Latitude: payload.Latitude, Longitude: payload.Longitude}
+	} else {
+		return nil, false
 	}
 	returned, err := netip.ParseAddr(address)
 	if err != nil || returned.Unmap() != ip || !validateLocation(&l) {
@@ -160,7 +174,7 @@ func validateLocation(l *Location) bool {
 			}
 		}
 	}
-	if l.ContinentCode != "" && !strings.Contains(" AF AN AS EU NA OC SA ", " "+l.ContinentCode+" ") {
+	if l.ContinentCode != "" && (len(l.ContinentCode) != 2 || !strings.Contains(" AF AN AS EU NA OC SA ", " "+l.ContinentCode+" ")) {
 		return false
 	}
 	if l.Timezone != "" {
@@ -182,6 +196,13 @@ func validateLocation(l *Location) bool {
 		if lat == 0 && lon == 0 {
 			l.Latitude = nil
 			l.Longitude = nil
+			l.AccuracyRadiusKM = nil
+		}
+	}
+	if l.AccuracyRadiusKM != nil {
+		radius := *l.AccuracyRadiusKM
+		if l.Latitude == nil || math.IsNaN(radius) || math.IsInf(radius, 0) || radius <= 0 || radius > 20000 {
+			return false
 		}
 	}
 	return true

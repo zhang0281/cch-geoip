@@ -12,10 +12,6 @@ func loadOnline(c *Config) error {
 	if err != nil {
 		return err
 	}
-	c.OnlineKey, err = secret("IPAPI_IS_API_KEY", "IPAPI_IS_API_KEY_FILE")
-	if err != nil {
-		return err
-	}
 	c.OnlineCacheDir = value("ONLINE_GEO_CACHE_DIR", "/var/lib/cch-geoip/online")
 	c.OnlineTimeout, err = duration("ONLINE_GEO_TIMEOUT", 2*time.Second, false)
 	if err != nil || c.OnlineTimeout > 2*time.Second {
@@ -25,11 +21,15 @@ func loadOnline(c *Config) error {
 	if err != nil || c.OnlineCacheTTL < time.Hour || c.OnlineCacheTTL > 7*24*time.Hour {
 		return fmt.Errorf("ONLINE_GEO_CACHE_TTL must be between 1h and 168h")
 	}
-	c.OnlineIPAPIBudget, err = onlineBudget("IPAPI_IS_DAILY_BUDGET")
+	c.OnlineIPSBBudget, err = onlineBudget("IPSB_DAILY_BUDGET")
 	if err != nil {
 		return err
 	}
 	c.OnlineIPWhoBudget, err = onlineBudget("IPWHO_IS_DAILY_BUDGET")
+	if err != nil {
+		return err
+	}
+	c.OnlineGeoJSBudget, err = onlineBudget("GEOJS_DAILY_BUDGET")
 	return err
 }
 

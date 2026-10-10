@@ -1,13 +1,9 @@
 # onlinegeo
 
-为国外 IP 提供免费在线地域补查，供 `internal/api` 使用；国内门控和 GeoLite2 回退由 API 层管理。仅依赖 Go 标准库。
+为国外IP提供免Key在线地域补查，供internal/api使用；国内门控及GeoLite2托底由API管理。仅依赖标准库。
 
-调用 `New(Options)` 初始化并恢复持久缓存，再用 `Lookup(ctx, ip, now)` 获取 `Result`。`Location=nil` 表示应使用离线结果；`Providers` 保留已尝试/跳过原因。ipapi.is Key 缺失时跳过，使用无需Key的ipwho.is。
+调用New(Options)恢复缓存与限额，Lookup(ctx,ip,now)返回Result；Location=nil表示离线回退。顺序缓存→IP.SB→ipwho.is→GeoJS，不需要账户或Key。固定HTTPS GET及专用User-Agent，限时/禁止redirect/限长并校验响应。GeoJSAccuracyRadiusKM只使用真实公里半径；未知保持nil。
 
-运行配置与示例见 [根README](../../README.md#国外在线-geo-与离线回退)，账户见 [ACCOUNTS](../../docs/ACCOUNTS.md#ipapiis-免费账户与-ipwhois)。
+每个provider本地滚动24h预算默认900，IP.SB另限90/min、4/sec；失败计额且先落盘后请求。同IP合并、16不同IP并发、4096缓存项。缓存默认24h最多7天，Maintain(now)每分钟由main触发清理。New拒绝坏状态，不静默重置限额。v1迁移保留ipwho配额/cache，删除ipapi数据。
 
-`Options.CacheDir` 必须可写，服务先保存额度才发请求；状态损坏拒绝初始化。单实例保留目录才能跨重启限频。缓存最多4096项、默认24h；provider默认滚动24h预算900次，失败计额；同IP并发合并，总时限2s，各provider最多一半。没有精度半径时不从可信度等级生成半径。
-
-验证：`go test -race ./internal/onlinegeo`。设计见 [DESIGN](DESIGN.md)。
-
-在线服务运行时独立每分钟清理过期缓存，即使没有新请求也会落盘删除；停服时不执行清理。维护原子状态时保留未过期额度记录。
+单进程可写CacheDir，保留目录才能跨重启限频；多个副本或同出口其他程序不共享锁。配置见[README](../../README.md#国外在线-geo-与离线回退)，免费条件见[ACCOUNTS](../../docs/ACCOUNTS.md#国外免-key-在线-geo)，设计见[DESIGN](DESIGN.md)。验证go test -race ./internal/onlinegeo。

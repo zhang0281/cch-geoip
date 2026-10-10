@@ -103,7 +103,7 @@ func TestIP2RegionPrimarySurvivesMissingOrConflictingMMDB(t *testing.T) {
 
 func TestForeignUsesCoherentOnlineLocation(t *testing.T) {
 	lat, lon := 37.45, 126.7
-	online := &onlineStub{result: onlinegeo.Result{Source: "ipapi.is", CacheHit: true, UpdatedAt: time.Now(), Location: &onlinegeo.Location{
+	online := &onlineStub{result: onlinegeo.Result{Source: "ip.sb", CacheHit: true, UpdatedAt: time.Now(), Location: &onlinegeo.Location{
 		CountryCode: "KR", Country: "South Korea", ContinentCode: "AS", Continent: "Asia", Region: "Incheon", City: "Incheon", Postal: "12345", Timezone: "Asia/Seoul", Latitude: &lat, Longitude: &lon, Accuracy: "HIGH",
 	}}}
 	status, d := lookupJSON(t, geoStub{record: fixtureRecord("US")}, nil, online, "/v1/ip2location/3.5.140.2?lang=zh-CN")
@@ -135,6 +135,18 @@ func TestOnlineWithoutCoordinatesClearsMMDBCoordinates(t *testing.T) {
 	_, d := lookupJSON(t, geoStub{record: fixtureRecord("US")}, nil, online, "/v1/ip2location/3.5.140.2")
 	if d["location"].(map[string]any)["coordinates"].(map[string]any)["latitude"] != float64(0) || d["_meta"].(map[string]any)["coordinates_available"] != false || d["timezone"].(map[string]any)["id"] != "" {
 		t.Fatal("offline location leaked into incomplete online result")
+	}
+}
+
+func TestGeoJSAccuracyRadiusUsesProviderKilometers(t *testing.T) {
+	lat, lon, radius := 37.4585, 126.7015, 20.0
+	online := &onlineStub{result: onlinegeo.Result{Source: "geojs", Location: &onlinegeo.Location{
+		CountryCode: "KR", Country: "South Korea", City: "Incheon", Latitude: &lat, Longitude: &lon, AccuracyRadiusKM: &radius,
+	}}}
+	_, d := lookupJSON(t, geoStub{record: fixtureRecord("US")}, nil, online, "/v1/ip2location/3.5.140.2")
+	coords := d["location"].(map[string]any)["coordinates"].(map[string]any)
+	if coords["accuracy_radius_km"] != radius {
+		t.Fatal("GeoJS accuracy was lost or replaced by MMDB")
 	}
 }
 

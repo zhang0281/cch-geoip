@@ -32,6 +32,7 @@ func TestRuntimeOnlineStatePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.endpoints[ipwho] = server.URL
+	s.state.Quotas[ipsb] = quota{BlockedUntil: time.Now().Add(time.Hour)}
 	ip := netip.MustParseAddr("3.5.140.2")
 	first := s.Lookup(context.Background(), ip, time.Now())
 	if first.Location == nil || first.Location.City != "Incheon" || first.CacheHit {

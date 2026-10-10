@@ -9,21 +9,21 @@ import (
 )
 
 type Config struct {
-	Listen, CityDB, ASNDB, Token                          string
-	RegionV4DB, RegionV6DB                                string
-	RegionDataDir                                         string
-	RegionVersion                                         string
-	ReloadInterval, MaxDBAge                              time.Duration
-	FeedsEnabled, AbuseEnabled                            bool
-	FeedDir, AbuseKey                                     string
-	FeedInterval, FeedMaxAge, AbuseTimeout, AbuseCacheTTL time.Duration
-	AbuseDailyBudget                                      int
-	AbuseBlacklistEnabled, AbuseCheckEnabled              bool
-	RegionEnabled                                         bool
-	OnlineEnabled                                         bool
-	OnlineKey, OnlineCacheDir                             string
-	OnlineTimeout, OnlineCacheTTL                         time.Duration
-	OnlineIPAPIBudget, OnlineIPWhoBudget                  int
+	Listen, CityDB, ASNDB, Token                           string
+	RegionV4DB, RegionV6DB                                 string
+	RegionDataDir                                          string
+	RegionVersion                                          string
+	ReloadInterval, MaxDBAge                               time.Duration
+	FeedsEnabled, AbuseEnabled                             bool
+	FeedDir, AbuseKey                                      string
+	FeedInterval, FeedMaxAge, AbuseTimeout, AbuseCacheTTL  time.Duration
+	AbuseDailyBudget                                       int
+	AbuseBlacklistEnabled, AbuseCheckEnabled               bool
+	RegionEnabled                                          bool
+	OnlineEnabled                                          bool
+	OnlineCacheDir                                         string
+	OnlineTimeout, OnlineCacheTTL                          time.Duration
+	OnlineIPSBBudget, OnlineIPWhoBudget, OnlineGeoJSBudget int
 }
 
 func Load() (Config, error) {

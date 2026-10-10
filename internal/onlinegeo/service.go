@@ -12,23 +12,25 @@ import (
 )
 
 const (
-	ipapi      = "ipapi.is"
+	ipsb       = "ip.sb"
 	ipwho      = "ipwho.is"
+	geojs      = "geojs"
 	maxEntries = 4096
 	maxFlights = 16
 	maxWaiters = 64
 )
 
 type Options struct {
-	IPAPIKey, CacheDir                 string
-	CacheTTL, Timeout                  time.Duration
-	IPAPIDailyBudget, IPWhoDailyBudget int
+	CacheDir                                            string
+	CacheTTL, Timeout                                   time.Duration
+	IPSBDailyBudget, IPWhoDailyBudget, GeoJSDailyBudget int
 }
 
 type Location struct {
 	CountryCode, Country, ContinentCode, Continent       string
 	Region, RegionCode, City, Postal, Timezone, Accuracy string
 	Latitude, Longitude                                  *float64
+	AccuracyRadiusKM                                     *float64
 }
 
 type ProviderStatus struct {
@@ -84,21 +86,24 @@ func New(o Options) (*Service, error) {
 	if o.Timeout == 0 {
 		o.Timeout = 2 * time.Second
 	}
-	if o.IPAPIDailyBudget == 0 {
-		o.IPAPIDailyBudget = 900
+	if o.IPSBDailyBudget == 0 {
+		o.IPSBDailyBudget = 900
 	}
 	if o.IPWhoDailyBudget == 0 {
 		o.IPWhoDailyBudget = 900
 	}
+	if o.GeoJSDailyBudget == 0 {
+		o.GeoJSDailyBudget = 900
+	}
 	if o.CacheDir == "" || o.CacheTTL < time.Hour || o.CacheTTL > 7*24*time.Hour ||
-		o.Timeout <= 0 || o.Timeout > 2*time.Second || o.IPAPIDailyBudget < 1 ||
-		o.IPAPIDailyBudget > 1000 || o.IPWhoDailyBudget < 1 || o.IPWhoDailyBudget > 1000 {
+		o.Timeout <= 0 || o.Timeout > 2*time.Second || o.IPSBDailyBudget < 1 ||
+		o.IPSBDailyBudget > 1000 || o.IPWhoDailyBudget < 1 || o.IPWhoDailyBudget > 1000 || o.GeoJSDailyBudget < 1 || o.GeoJSDailyBudget > 1000 {
 		return nil, errors.New("invalid online geolocation configuration")
 	}
 	s := &Service{options: o, flights: make(map[netip.Addr]*flight),
-		state:     diskState{Version: 1, Cache: make(map[string]cacheEntry), Quotas: map[string]quota{ipapi: {}, ipwho: {}}},
+		state:     diskState{Version: 2, Cache: make(map[string]cacheEntry), Quotas: map[string]quota{ipsb: {}, ipwho: {}, geojs: {}}},
 		client:    &http.Client{Timeout: o.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
-		endpoints: map[string]string{ipapi: "https://api.ipapi.is", ipwho: "https://ipwho.is"}}
+		endpoints: map[string]string{ipsb: "https://api.ip.sb/geoip", ipwho: "https://ipwho.is", geojs: "https://get.geojs.io/v1/ip/geo"}}
 	if err := s.load(time.Now()); err != nil {
 		return nil, err
 	}
@@ -161,11 +166,7 @@ func (s *Service) Lookup(ctx context.Context, ip netip.Addr, now time.Time) Resu
 
 func (s *Service) lookup(ctx context.Context, ip netip.Addr, now time.Time) Result {
 	r := Result{}
-	for _, provider := range []string{ipapi, ipwho} {
-		if provider == ipapi && s.options.IPAPIKey == "" {
-			r.Providers = append(r.Providers, ProviderStatus{provider, "disabled"})
-			continue
-		}
+	for _, provider := range []string{ipsb, ipwho, geojs} {
 		if ctx.Err() != nil {
 			r.Providers = append(r.Providers, ProviderStatus{provider, "canceled"})
 			break
@@ -175,7 +176,7 @@ func (s *Service) lookup(ctx context.Context, ip netip.Addr, now time.Time) Resu
 			r.Providers = append(r.Providers, ProviderStatus{provider, state})
 			continue
 		}
-		providerCtx, cancel := context.WithTimeout(ctx, s.options.Timeout/2)
+		providerCtx, cancel := context.WithTimeout(ctx, s.options.Timeout/3)
 		location, state, cooldown := s.fetch(providerCtx, provider, ip, now)
 		cancel()
 		r.Providers = append(r.Providers, ProviderStatus{provider, state})
@@ -218,12 +219,29 @@ func (s *Service) reserve(provider string, now time.Time) string {
 	if now.Before(q.BlockedUntil) {
 		return "cooldown"
 	}
-	budget := s.options.IPAPIDailyBudget
+	budget := s.options.IPSBDailyBudget
 	if provider == ipwho {
 		budget = s.options.IPWhoDailyBudget
 	}
+	if provider == geojs {
+		budget = s.options.GeoJSDailyBudget
+	}
 	if len(q.Attempts) >= budget {
 		return "quota_exhausted"
+	}
+	if provider == ipsb {
+		minute, second := 0, 0
+		for _, timestamp := range q.Attempts {
+			if timestamp.After(now.Add(-time.Minute)) {
+				minute++
+			}
+			if timestamp.After(now.Add(-time.Second)) {
+				second++
+			}
+		}
+		if minute >= 90 || second >= 4 {
+			return "rate_limited"
+		}
 	}
 	q.Attempts = append(q.Attempts, now.UTC())
 	s.state.Quotas[provider] = q
@@ -298,6 +316,10 @@ func cloneResult(r Result) Result {
 		if copy.Longitude != nil {
 			v := *copy.Longitude
 			copy.Longitude = &v
+		}
+		if copy.AccuracyRadiusKM != nil {
+			v := *copy.AccuracyRadiusKM
+			copy.AccuracyRadiusKM = &v
 		}
 		r.Location = &copy
 	}

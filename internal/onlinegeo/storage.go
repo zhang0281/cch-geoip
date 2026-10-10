@@ -41,16 +41,31 @@ func (s *Service) load(now time.Time) error {
 	if decoder.Decode(&state) != nil || decoder.Decode(new(any)) != io.EOF || !validState(state, now) {
 		return errors.New("invalid online geolocation persistent state")
 	}
+	if state.Version == 1 {
+		delete(state.Quotas, "ipapi.is")
+		state.Quotas[ipsb] = quota{}
+		state.Quotas[geojs] = quota{}
+		for address, entry := range state.Cache {
+			if entry.Source == "ipapi.is" {
+				delete(state.Cache, address)
+			}
+		}
+		state.Version = 2
+	}
 	s.state = state
 	s.prune(now)
 	return nil
 }
 
 func validState(state diskState, now time.Time) bool {
-	if state.Version != 1 || state.Cache == nil || len(state.Cache) > maxEntries || len(state.Quotas) != 2 {
+	providers := []string{ipsb, ipwho, geojs}
+	if state.Version == 1 {
+		providers = []string{"ipapi.is", ipwho}
+	}
+	if (state.Version != 1 && state.Version != 2) || state.Cache == nil || len(state.Cache) > maxEntries || len(state.Quotas) != len(providers) {
 		return false
 	}
-	for _, provider := range []string{ipapi, ipwho} {
+	for _, provider := range providers {
 		q, ok := state.Quotas[provider]
 		if !ok || len(q.Attempts) > 1000 || q.BlockedUntil.After(now.Add(24*time.Hour)) {
 			return false
@@ -62,9 +77,15 @@ func validState(state diskState, now time.Time) bool {
 		}
 	}
 	for address, e := range state.Cache {
+		validProvider := false
+		for _, provider := range providers {
+			if e.Source == provider {
+				validProvider = true
+			}
+		}
 		ip, err := netip.ParseAddr(address)
 		if err != nil || !publicAddress(ip) || ip.Unmap().String() != address ||
-			(e.Source != ipapi && e.Source != ipwho) || e.UpdatedAt.IsZero() || e.UpdatedAt.After(now) || !validateLocation(&e.Location) {
+			!validProvider || e.UpdatedAt.IsZero() || e.UpdatedAt.After(now) || !validateLocation(&e.Location) {
 			return false
 		}
 	}

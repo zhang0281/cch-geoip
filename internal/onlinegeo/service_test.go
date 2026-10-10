@@ -18,8 +18,8 @@ import (
 
 var sampleIP = netip.MustParseAddr("9.9.9.9")
 
-func ipapiBody(ip string) string {
-	return fmt.Sprintf(`{"ip":%q,"location":{"country_code":"US","country":"United States","continent":"North America","state":"California","city":"Los Angeles","latitude":34.05,"longitude":-118.24,"timezone":"America/Los_Angeles","zip":"90001","accuracy":"high"}}`, ip)
+func ipsbBody(ip string) string {
+	return fmt.Sprintf(`{"ip":%q,"country_code":"US","country":"United States","continent_code":"NA","region":"California","region_code":"CA","city":"Los Angeles","latitude":34.05,"longitude":-118.24,"timezone":"America/Los_Angeles","postal_code":"90001"}`, ip)
 }
 
 func ipwhoBody(ip string) string {
@@ -35,10 +35,15 @@ func testService(t *testing.T, o Options, apiHandler, whoHandler http.HandlerFun
 	if err != nil {
 		t.Fatal(err)
 	}
+	fallback := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }))
+	t.Cleanup(fallback.Close)
+	for _, provider := range []string{ipsb, ipwho, geojs} {
+		s.endpoints[provider] = fallback.URL
+	}
 	if apiHandler != nil {
 		server := httptest.NewServer(apiHandler)
 		t.Cleanup(server.Close)
-		s.endpoints[ipapi] = server.URL
+		s.endpoints[ipsb] = server.URL
 	}
 	if whoHandler != nil {
 		server := httptest.NewServer(whoHandler)
@@ -48,26 +53,21 @@ func testService(t *testing.T, o Options, apiHandler, whoHandler http.HandlerFun
 	return s
 }
 
-func TestOrderingCachingKeyProtectionAndRestart(t *testing.T) {
-	const key = "secret-do-not-leak"
+func TestOrderingKeylessPathsCachingAndRestart(t *testing.T) {
 	var first, second atomic.Int32
-	s := testService(t, Options{IPAPIKey: key}, func(w http.ResponseWriter, r *http.Request) {
+	s := testService(t, Options{}, func(w http.ResponseWriter, r *http.Request) {
 		first.Add(1)
-		if r.Method != http.MethodPost || r.URL.RawQuery != "" || strings.Contains(r.URL.String(), key) {
-			t.Error("credential must be POST body only")
+		if r.Method != http.MethodGet || r.URL.RawQuery != "" || r.URL.Path != "/"+sampleIP.String() || r.Header.Get("User-Agent") != "cch-geoip/0.5.0" {
+			t.Error("invalid keyless provider request")
 		}
-		var request struct{ Q, Key string }
-		if json.NewDecoder(r.Body).Decode(&request) != nil || request.Q != sampleIP.String() || request.Key != key {
-			t.Error("invalid provider request")
-		}
-		fmt.Fprint(w, ipapiBody(sampleIP.String()))
+		fmt.Fprint(w, ipsbBody(sampleIP.String()))
 	}, func(w http.ResponseWriter, r *http.Request) {
 		second.Add(1)
 		fmt.Fprint(w, ipwhoBody(sampleIP.String()))
 	})
 	now := time.Now()
 	r := s.Lookup(context.Background(), sampleIP, now)
-	if r.Location == nil || r.Source != ipapi || r.CacheHit || r.Location.City != "Los Angeles" || r.Location.Accuracy != "high" {
+	if r.Location == nil || r.Source != ipsb || r.CacheHit || r.Location.City != "Los Angeles" || r.Location.AccuracyRadiusKM != nil {
 		t.Fatalf("unexpected result: %+v", r)
 	}
 	if first.Load() != 1 || second.Load() != 0 {
@@ -78,10 +78,6 @@ func TestOrderingCachingKeyProtectionAndRestart(t *testing.T) {
 	cached := s.Lookup(context.Background(), sampleIP, now.Add(time.Second))
 	if !cached.CacheHit || cached.Location.City != "Los Angeles" || *cached.Location.Latitude != 34.05 {
 		t.Fatal("cache must be immutable to callers")
-	}
-	b, err := os.ReadFile(filepath.Join(s.options.CacheDir, stateFile))
-	if err != nil || strings.Contains(string(b), key) {
-		t.Fatal("state leaked credential")
 	}
 	info, err := os.Stat(filepath.Join(s.options.CacheDir, stateFile))
 	if err != nil || info.Mode().Perm() != 0600 {
@@ -94,30 +90,23 @@ func TestOrderingCachingKeyProtectionAndRestart(t *testing.T) {
 	if !restarted.Lookup(context.Background(), sampleIP, time.Now()).CacheHit {
 		t.Fatal("cache lost on restart")
 	}
-	if len(restarted.state.Quotas[ipapi].Attempts) != 1 {
+	if len(restarted.state.Quotas[ipsb].Attempts) != 1 {
 		t.Fatal("quota lost on restart")
 	}
 }
 
-func TestMissingKeyAndBackup(t *testing.T) {
+func TestKeylessBackup(t *testing.T) {
 	var first, second atomic.Int32
-	for _, key := range []string{"", "test"} {
-		t.Run(key, func(t *testing.T) {
-			s := testService(t, Options{IPAPIKey: key}, func(w http.ResponseWriter, r *http.Request) { first.Add(1); http.Error(w, "no", 503) }, func(w http.ResponseWriter, r *http.Request) {
-				second.Add(1)
-				fmt.Fprint(w, ipwhoBody(sampleIP.String()))
-			})
-			r := s.Lookup(context.Background(), sampleIP, time.Now())
-			if r.Location == nil || r.Source != ipwho || r.Location.Timezone != "America/Toronto" || r.Location.Postal != "M5H" {
-				t.Fatal("backup failed")
-			}
-			if key == "" && r.Providers[0].State != "disabled" {
-				t.Fatal("missing key should skip ipapi")
-			}
-		})
+	s := testService(t, Options{}, func(w http.ResponseWriter, r *http.Request) { first.Add(1); http.Error(w, "no", 503) }, func(w http.ResponseWriter, r *http.Request) {
+		second.Add(1)
+		fmt.Fprint(w, ipwhoBody(sampleIP.String()))
+	})
+	r := s.Lookup(context.Background(), sampleIP, time.Now())
+	if r.Location == nil || r.Source != ipwho || r.Location.Timezone != "America/Toronto" || r.Location.Postal != "M5H" {
+		t.Fatal("backup failed")
 	}
-	if first.Load() != 1 || second.Load() != 2 {
-		t.Fatal("missing key sent request")
+	if first.Load() != 1 || second.Load() != 1 {
+		t.Fatal("backup order incorrect")
 	}
 }
 
@@ -139,7 +128,7 @@ func TestQuotaReservedBeforeNetworkAndSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted.endpoints[ipwho] = s.endpoints[ipwho]
+	restarted.endpoints = s.endpoints
 	r := restarted.Lookup(context.Background(), netip.MustParseAddr("8.8.8.8"), now.Add(2*time.Minute))
 	if calls.Load() != 1 || r.Location != nil || r.Providers[1].State != "quota_exhausted" {
 		t.Fatalf("quota reset: %+v", r)
@@ -166,7 +155,7 @@ func Test429CooldownPersistsAndExpires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted.endpoints[ipwho] = s.endpoints[ipwho]
+	restarted.endpoints = s.endpoints
 	r := restarted.Lookup(context.Background(), sampleIP, now.Add(time.Minute))
 	if calls.Load() != 1 || r.Providers[1].State != "cooldown" {
 		t.Fatal("cooldown not preserved")
@@ -178,7 +167,7 @@ func Test429CooldownPersistsAndExpires(t *testing.T) {
 }
 
 func TestTimeoutLeavesBackupBudget(t *testing.T) {
-	s := testService(t, Options{IPAPIKey: "test", Timeout: 200 * time.Millisecond}, func(w http.ResponseWriter, r *http.Request) {
+	s := testService(t, Options{Timeout: 200 * time.Millisecond}, func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 		case <-time.After(300 * time.Millisecond):
@@ -305,10 +294,10 @@ func TestRedirectRejectedAndOversizedResponse(t *testing.T) {
 	var redirected atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		redirected.Add(1)
-		fmt.Fprint(w, ipapiBody(sampleIP.String()))
+		fmt.Fprint(w, ipsbBody(sampleIP.String()))
 	}))
 	defer target.Close()
-	s := testService(t, Options{IPAPIKey: "secret"}, func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) }, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, strings.Repeat("x", maxResponseBytes+1)) })
+	s := testService(t, Options{}, func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, 307) }, func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, strings.Repeat("x", maxResponseBytes+1)) })
 	r := s.Lookup(context.Background(), sampleIP, time.Now())
 	if redirected.Load() != 0 || r.Location != nil || r.Providers[1].State != "invalid_response" {
 		t.Fatalf("unsafe HTTP handling: %+v", r)
@@ -316,9 +305,9 @@ func TestRedirectRejectedAndOversizedResponse(t *testing.T) {
 }
 
 func TestResponseValidation(t *testing.T) {
-	valid := ipapiBody(sampleIP.String())
+	valid := ipsbBody(sampleIP.String())
 	for _, body := range []string{
-		ipapiBody("8.8.8.8"),
+		ipsbBody("8.8.8.8"),
 		strings.Replace(valid, `"US"`, `"XX"`, 1),
 		strings.Replace(valid, `34.05`, `91`, 1),
 		strings.Replace(valid, `-118.24`, `181`, 1),
@@ -326,13 +315,13 @@ func TestResponseValidation(t *testing.T) {
 		strings.Replace(valid, `America/Los_Angeles`, `No/Such_Zone`, 1),
 		strings.Replace(valid, `"California"`, `""`, 1),
 		`{"ip":"9.9.9.9","is_bogon":true,"location":{}}`,
-		strings.Replace(valid, `"ip":`, `"error":"secret-provider-message","ip":`, 1),
+		`{"error":"secret-provider-message"}`,
 		valid + `{}`,
 	} {
-		if strings.Contains(body, `"state":"","city":"Los Angeles"`) {
+		if strings.Contains(body, `"region":"","region_code":"CA","city":"Los Angeles"`) {
 			body = strings.Replace(body, `"Los Angeles"`, `""`, 1)
 		}
-		if _, ok := parseLocation(ipapi, []byte(body), sampleIP); ok {
+		if _, ok := parseLocation(ipsb, []byte(body), sampleIP); ok {
 			t.Errorf("accepted invalid response: %s", body)
 		}
 	}
@@ -340,7 +329,7 @@ func TestResponseValidation(t *testing.T) {
 		t.Fatal("accepted failed lookup")
 	}
 	missingCoordinates := strings.Replace(strings.Replace(valid, `34.05`, `null`, 1), `-118.24`, `null`, 1)
-	l, ok := parseLocation(ipapi, []byte(missingCoordinates), sampleIP)
+	l, ok := parseLocation(ipsb, []byte(missingCoordinates), sampleIP)
 	if !ok || l.Latitude != nil || l.Longitude != nil {
 		t.Fatal("unknown coordinates must remain unknown")
 	}
@@ -351,21 +340,21 @@ func TestResponseValidation(t *testing.T) {
 	}
 }
 
-func TestIPAPIContinentCodeFromOfficialShape(t *testing.T) {
-	body := strings.Replace(ipapiBody(sampleIP.String()), `"continent":"North America"`, `"continent":"NA"`, 1)
-	l, ok := parseLocation(ipapi, []byte(body), sampleIP)
+func TestIPSBContinentCodeFromOfficialShape(t *testing.T) {
+	body := ipsbBody(sampleIP.String())
+	l, ok := parseLocation(ipsb, []byte(body), sampleIP)
 	if !ok || l.ContinentCode != "NA" || l.Continent != "North America" {
 		t.Fatalf("continent code not normalized: %+v", l)
 	}
 	for code, name := range continentNames {
-		body = strings.Replace(ipapiBody(sampleIP.String()), `"continent":"North America"`, `"continent":"`+code+`"`, 1)
-		l, ok = parseLocation(ipapi, []byte(body), sampleIP)
+		body = strings.Replace(ipsbBody(sampleIP.String()), `"continent_code":"NA"`, `"continent_code":"`+code+`"`, 1)
+		l, ok = parseLocation(ipsb, []byte(body), sampleIP)
 		if !ok || l.ContinentCode != code || l.Continent != name {
 			t.Fatal("continent mapping incomplete")
 		}
 	}
-	b, err := json.Marshal(ProviderStatus{Provider: ipapi, State: "ready"})
-	if err != nil || string(b) != `{"provider":"ipapi.is","state":"ready"}` {
+	b, err := json.Marshal(ProviderStatus{Provider: ipsb, State: "ready"})
+	if err != nil || string(b) != `{"provider":"ip.sb","state":"ready"}` {
 		t.Fatal("provider metadata keys not lowercase")
 	}
 }
@@ -380,13 +369,13 @@ func TestRetryAfterBounds(t *testing.T) {
 	}
 }
 
-func TestIPAPIIncompleteRecordTriesBackup(t *testing.T) {
+func TestIPSBIncompleteRecordTriesBackup(t *testing.T) {
 	for _, bad := range []string{
-		strings.Replace(strings.Replace(ipapiBody(sampleIP.String()), `"California"`, `""`, 1), `"Los Angeles"`, `""`, 1),
-		ipapiBody("8.8.8.8"),
+		strings.Replace(strings.Replace(ipsbBody(sampleIP.String()), `"California"`, `""`, 1), `"Los Angeles"`, `""`, 1),
+		ipsbBody("8.8.8.8"),
 		`{"error":"token secret upstream details"}`,
 	} {
-		s := testService(t, Options{IPAPIKey: "test"}, func(w http.ResponseWriter, r *http.Request) {
+		s := testService(t, Options{}, func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, bad)
 		}, func(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, ipwhoBody(sampleIP.String()))
@@ -406,7 +395,7 @@ func TestCanceledCallerAndBoundedFlights(t *testing.T) {
 	s := testService(t, Options{}, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if r := s.Lookup(ctx, sampleIP, time.Now()); r.Location != nil || r.Providers[1].State != "canceled" {
+	if r := s.Lookup(ctx, sampleIP, time.Now()); r.Location != nil || r.Providers[0].State != "canceled" {
 		t.Fatal("canceled lookup sent request")
 	}
 	for i := 0; i < maxFlights; i++ {

@@ -2,6 +2,14 @@
 
 源码、配置与测试在 `/home/zhang/work/projects/cch-geoip`。首版历史记录保留于下方；2026-10-09 的 0.2.0 已部署 Oracle，真实数据库/AbuseIPDB 可用，CCH 已切到本地服务。
 
+## 国外免 Key 三渠道（2026-10-10，0.5.0）
+
+- IP.SB/ipwho.is/GeoJS全部免Key，在线顺序与配置说明已替换；国内ip2region及GeoLite2离线托底不变。
+- Oracle真实免Key候选实测IP.SB和GeoJS指定IPv4/IPv6均HTTP200；IP.SB约50–150ms，GeoJS约200–300ms。3.5.140.2返回Incheon，GeoJS真实accuracy20km；AnycastIPv6可只有国家/1000km，不能据连通性宣称精度。
+- Go1.26.9 race+cover、vet、processsmoke与Docker/non-root状态保存恢复验证通过；onlinegeo覆盖91.7%。新增三渠道顺序、GeoJS字符串coords/实际半径、IP.SB滚动分钟/秒限频与重启、v1到v2保守迁移及半径指针隔离。
+- 独立review加隔离overlay验证：v1ipwho缓存/attempts/cooldown不重置，v2重启保留，90/min4/sec边界、双timeout仍给第三渠道机会，真实公里半径到CCH字段及cacheclone。
+- 安全/质量扫描、合成凭据Compose、格式与文档链接通过。0.5.0实际发布/Oracle切换验收与源码mock分别记录，准确率仍需已知所在地样本。
+
 ## 国外免费在线优先（2026-10-10，0.4.0）
 
 - Go1.26.9 `make test vet smoke`、完整Docker build与`make docker-smoke`通过；API覆盖94.7%，config97.6%，onlinegeo89.9%，真实内置ip2region reader88.8%。

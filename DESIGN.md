@@ -81,18 +81,14 @@ SSRF 面被固定 provider URL 和 IP literal 验证收窄。AbuseIPDB 只向固
 
 CCH 日期边界：blocklists 的真实列入时间未知时 `listed_at` 返回 null，避免 RelativeTime 组件对空字符串执行 toISOString 抛异常。其 runtime 接受 null，但 CCH 当前 TypeScript 声明仅 string；这是有意的 nullable 扩展，未来 CCH 若加强 schema 需重新验证。没有拿下载时间伪装成列入时间。
 
-## 国外在线优先（2026-10-10）
+## 国外免 Key 在线优先（2026-10-10，0.5.0）
 
-用户选择永久免费在线 Geo 优先；国内保持 ip2region/GeoLite2。新增 `internal/onlinegeo` 仅管理 provider I/O、缓存与额度；`internal/api` 决定国内门控并将同源地理记录写为 CCH schema。纯离线虽然可靠但国外城市覆盖不足；每次并发查多个 API 浪费额度且难解释冲突，因此选择缓存 → ipapi.is → ipwho.is 的顺序失败回退，最终 GeoLite2。
+0.4.0初版实现免费账户ipapi.is→ipwho.is；用户无法注册，0.5.0改为缓存→IP.SB→ipwho.is→GeoJS→GeoLite2。使用用户清单中有正式HTTPS接口说明的IP.SB/GeoJS，保留实测可用的ipwho备用；不依赖demo或本机IP-only接口。IP.SB/GeoJS仍有GeoIP数据来源重叠，不承诺它们一定比离线GeoLite更准。
 
-国内门控采用任一本地来源的 CN 判断，减少国内请求外发；有效国内 ip2region 地域可独立服务，不依赖 MMDB 国家一致或是否可用；冲突时补成 CN/AS 和国家默认 Asia/Shanghai 时区，清除错误坐标/邮编。在线地域成组替换国家/continent/省市/邮编/coords/timezone，不把 GeoLite2 的 1000 km 坐标拼到在线城市。保留离线 ASN、现有 threat。未知半径为 null，provider 可信度等级保留为原始 metadata。没有可靠地面真值的 IP 不能用于宣称准确率提升，尤其 Anycast。
+`internal/onlinegeo`管理provider、缓存与额度；API负责国内门控、同源地域替换与离线托底。国内有效CNxdb可独立服务，即使MMDB陈旧或国家冲突；国家/continent/时区保持一致，未知coords不拼接另一来源。国外provider记录成组替换地理字段、保留离线ASN及现有threat。GeoJS字符串经纬度只解析有限数字，实际accuracy公里半径独立字段；IP.SB和ipwho未知半径保持null，不伪造精度。
 
-provider URL 固定 HTTPS；ipapi Key 用 POST body，禁止 redirect；响应限长并验证查询 IP、国家码、有限坐标、时区。每次请求先原子持久化额度，再发网络请求，持久化失败不外发。滚动 24h 默认900/硬上限1000；429 cooldown、同 IP 合并、有限并发与4096项缓存避免额度/内存放大。缓存默认24h、配置最长7天，过期删除，不超过ipapi许可的30天。存储损坏禁用在线模块并告警，避免静默重置预算；磁盘中不存API Key。
+三个provider固定HTTPS GET、专用User-Agent、禁止redirect、128KiB响应上限、返回IP一致性、国家码/坐标/时区校验；每次请求前保存滚动24h额度。缺省各900次/24h是本地保守策略，IPwho官方1000/日；IP.SB另持久化90/min和4/sec限频，拒绝后立即尝试备用，GeoJS上游仍可动态限流。三provider分配总时限的1/3，默认总2s；Oracle总900ms配合原有CCH1500ms，不重建CCH或数据库。
 
-单实例、保留 volume 为限频前提；多副本不共享锁，外部同账户请求也无法计数。上游 Key 由用户自行申请，不默认注册、购买 credits 或配置付款。CCH 内部管理面板使用 ipapi 数据，不把本服务开放成面向第三方的 Geo 查询产品。普通用户 CCH 查询是否符合相同用途需部署者按实际访问范围判断。
+状态v2保存3provider额度与缓存；v1严格验证后迁移，保留ipwho额度/cooldown/缓存，删除退役ipapi数据，不重置既有消耗。坏状态启动时禁用在线，文件0600且原子rename/fsync；无需存储任何在线GeoKey。缓存最长7天、独立每分钟空闲清理；停止服务无法清理。单进程写同一个目录，多个副本不共享锁，其他同出口程序消耗不受本实例计数控制。
 
-两个在线 provider 共用总时限，默认2s，各最多一半；Abuse CHECK 另有500ms。文档将CCH时限建议升至3500ms；现有Oracle CCH1500ms保持不重建，侧车使用900ms在线时限。请求取消会释放等待，同IP首请求取消可能使共享查询失败，后续请求可重新尝试。
-
-新增验证覆盖国内不外发、国外在线成组替换、在线缺坐标不拼接本地坐标、缓存/并发/重启、预算落盘前置、429/超时/恶意响应与重定向。发布前通过实际scratch/non-root/writable-volume验收；provider实际准确率仍需已知所在地样本，不以mock或字段数量代替。
-
-在线服务运行时独立每分钟清理过期缓存，即使没有新请求也会落盘删除；停服时不执行清理。维护原子状态时保留未过期额度记录。
+0.4.0已验证race、mock、scratch/non-root/read-onlyrootfs和Oracle真实在线/缓存持久化；0.5.0新增三provider顺序、GeoJS半径/字符串coords、IP.SB短窗口限频及保守迁移测试，生产/发布状态另记验证文档。只有known-location样本才可证明准确率，API连通或字段数量不是精度证据。

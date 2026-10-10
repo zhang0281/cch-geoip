@@ -89,24 +89,28 @@ Dockerfile 从官方固定 release 下载 xdb，并用 SHA256 校验，许可证
 
 ## 国外在线 Geo 与离线回退
 
-Compose 默认开启 `ONLINE_GEO_ENABLED=true`，原生 binary 默认关闭。国内 IP 不发送给这两个 Geo API；ip2region 返回有效 CN 地域时优先使用它，国内未命中使用 GeoLite2。任一本地来源认定为 CN 时都会跳过在线 Geo，以避免国内请求外发；来源冲突时以有效国内 ip2region 地域为准，并清除 MaxMind 的其他国家坐标/邮编。
+Compose 默认开启 `ONLINE_GEO_ENABLED=true`，原生 binary 默认关闭。国内 ip2region 返回有效 CN 地域时优先使用它，未命中使用 GeoLite2；任一本地来源认定 CN 时都跳过在线 Geo。来源冲突时以有效国内 ip2region 地域为准，不拼接 MaxMind 的其他国家坐标或邮编。
 
-国外查询顺序：有效缓存 → ipapi.is 免费账户 → ipwho.is 免费接口 → GeoLite2。ipapi.is 未配置 Key 时跳过，ipwho.is 无需注册。在线省市、国家、邮编、坐标及时区来自同一个 provider；ASN 仍来自本地 MMDB。在线名称为英文，`lang=zh-CN` 不会凭空生成翻译。未提供精度半径时 `accuracy_radius_km=null`，可信度等级单独保存在 `_meta.location_accuracy`，不转换成公里数。在线 Geo 不更改现有 threat/privacy 策略。
+**国外查询：有效缓存 → IP.SB → ipwho.is → GeoJS → GeoLite2。三种在线服务全部免注册、免 Key。** 不再使用 ipapi.is，不依赖网页 demo、HTTP 明文接口或只能查询本机IP的接口。[清单来源](https://github.com/ihmily/ip-info-api) 用于发现候选，实际协议及限频以 [IP.SB](https://ip.sb/api/)、[ipwho.is](https://ipwhois.io/documentation)、[GeoJS](https://www.geojs.io/docs/v1/endpoints/geo/) 官方文档为准。
 
 ```dotenv
 ONLINE_GEO_ENABLED=true
-IPAPI_IS_API_KEY=your_free_account_key
 ONLINE_GEO_CACHE_TTL=24h
 ONLINE_GEO_TIMEOUT=2s
-IPAPI_IS_DAILY_BUDGET=900
+IPSB_DAILY_BUDGET=900
 IPWHO_IS_DAILY_BUDGET=900
+GEOJS_DAILY_BUDGET=900
 ```
 
-缓存及每次请求前保存的额度记录位于已有 writable volume 的 `/var/lib/cch-geoip/online`；保留 volume 可跨重启复用。每个 provider 默认滚动 24 小时最多 900 次尝试，失败也计额；同 IP 并发合并。429、网络失败或配额用尽自动跳过该 provider。只配置免费账户，不购买 credits、不调用付费功能。多个副本或其他程序的消耗无法由本实例统一计数，须自行留余量。
+在线国家/continent/省市/邮编/坐标/时区成组来自一个 provider；ASN仍来自本地MMDB，现有threat/privacy独立。未提供半径时 `accuracy_radius_km=null`；GeoJS 的 `accuracy` 按官方公里半径原样映射，不把缺失值伪装成精度。在线名称为英文。字段丰富和坐标小数位不证明实际定位更准，Anycast返回城市尤其不适合作为精度样本。
 
-默认在线总等待最多 2 秒，每个 provider 最多使用一半。若启用 AbuseIPDB CHECK，还可能增加 500 ms；CCH 的 `IP_GEO_TIMEOUT_MS` 建议至少 3500。若 CCH 保持 1500 ms，可将 `ONLINE_GEO_TIMEOUT=900ms`，代价是网络较慢时更容易回退。缓存损坏或无法写入时停用在线模块，保留离线服务；不要删除额度文件以重置限额。
+缓存和每次请求前落盘的额度记录位于 `/var/lib/cch-geoip/online`，保留 writable volume 可跨重启复用。缓存默认24h，允许1h–7天，独立每分钟清理过期项；最多4096项、16个不同IP并发，同IP请求合并。0.4.0 的旧状态自动迁移：保留ipwho.is额度、cooldown和有效缓存，删除ipapi.is数据，不重置已有额度。
 
-`_meta.online_geo` 提供 provider 状态、缓存命中、实际来源和更新时间。`ONLINE_GEO_ENABLED=false` 可恢复全部离线。账户与许可条件见 [ACCOUNTS.md](docs/ACCOUNTS.md)。在线请求会把被查询的国外 IP 发给所选提供方，缓存也会保存这些 IP；无需将它们写入业务日志。
+每provider默认滚动24h本地预算900次，失败也计额。ipwho.is官方免费上限1000次/日/出口IP；IP.SB当前100次/分钟、最多5次/秒，本项目另限90次/分钟、4次/秒；GeoJS未公布固定免费配额，仍受其反滥用限频，本项目采用900次/24h本地预算。这些本地预算不是上游SLA或额度保证；其他程序/副本共用出口仍会共同消耗限额。429、故障与额度耗尽跳到下个provider，无需自动购买或充值。
+
+默认在线总时限2s，每provider最多三分之一；若启用AbuseIPDB CHECK还可能增加500ms，CCH `IP_GEO_TIMEOUT_MS` 建议3500。现有CCH保持1500ms时，可用 `ONLINE_GEO_TIMEOUT=900ms`；较慢网络更容易回退。有效在线结果可在MMDB不就绪时返回，ASN未知；所有地理来源均不可用才失败。状态损坏/无法写入停用在线模块，不静默重置额度。
+
+`_meta.online_geo`保留实际来源、更新时间、缓存命中和provider回退状态。开启后，未缓存的国外IP会发送给上述提供方并保存在本地缓存，不写业务日志。`ONLINE_GEO_ENABLED=false`恢复纯离线。用途与运行说明见 [ACCOUNTS.md](docs/ACCOUNTS.md)。
 
 ## threat 与 privacy
 
@@ -145,8 +149,7 @@ Compose 默认启用本地名单，原生二进制默认关闭，需 `THREAT_FEE
 | `ONLINE_GEO_CACHE_DIR` | `/var/lib/cch-geoip/online` | writable 持久缓存与额度 |
 | `ONLINE_GEO_CACHE_TTL` | `24h` | 允许 `1h`–`168h` |
 | `ONLINE_GEO_TIMEOUT` | `2s` | 在线总时限，正数且不超过 2s |
-| `IPAPI_IS_API_KEY` / `IPAPI_IS_API_KEY_FILE` | 未设置 | 免费账户 Key；缺失跳过，二者互斥 |
-| `IPAPI_IS_DAILY_BUDGET` / `IPWHO_IS_DAILY_BUDGET` | `900` | 每 provider 滚动 24h 次数，范围 1–1000 |
+| `IPSB_DAILY_BUDGET` / `IPWHO_IS_DAILY_BUDGET` / `GEOJS_DAILY_BUDGET` | `900` | 每 provider 本地滚动24h预算，范围1–1000 |
 | `THREAT_CACHE_DIR` | 空；Compose 为 `/var/lib/cch-geoip` | 空值时只保存在内存 |
 | `THREAT_UPDATE_INTERVAL` | `24h` | 至少 24h |
 | `THREAT_MAX_AGE` | `72h` | 过期名单停止参与匹配 |

@@ -14,4 +14,5 @@
 
 所有测试 MMDB 均为项目生成的合成数据；仓库不再分发真实 GeoLite2 数据。第三方库的许可证以其各自 LICENSE 为准。
 
-- 国外在线 Geo（2026-10-10核对）：[ipapi.is API](https://ipapi.is/developers.html)、[条款](https://ipapi.is/terms.html)，注册免费账户1000次/日、完整响应、缓存最多30天、内部用途；匿名接口格式和额度不作为本项目依赖。[ipwho.is](https://ipwhois.io/documentation) 免费HTTPS、IPv4/IPv6、1000次/日/出口IP，省市坐标与时区；不采用付费security数据。各provider可调整免费政策，本项目预算/退避不是上游额度保证。
+
+- 国外免Key Geo（2026-10-10）：[候选清单](https://github.com/ihmily/ip-info-api)、[IP.SB正式API](https://ip.sb/api/)和[使用条件](https://ip.sb/terms-of-use/)，100/min且最多5/sec，支持指定IPv4/IPv6；[ipwho.is](https://ipwhois.io/documentation)免费1000/day/出口IP；[GeoJS](https://www.geojs.io/docs/v1/endpoints/geo/)返回字符串coords及accuracy公里半径，[合理使用条件](https://www.geojs.io/tos/)可动态限流。0.5.0不再使用ipapi.is或清单中demo/失效接口。
