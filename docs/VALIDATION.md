@@ -2,6 +2,13 @@
 
 源码、配置与测试在 `/home/zhang/work/projects/cch-geoip`。首版历史记录保留于下方；2026-10-09 的 0.2.0 已部署 Oracle，真实数据库/AbuseIPDB 可用，CCH 已切到本地服务。
 
+## 国内 IP.SB 优先（2026-10-10，0.6.0）
+
+- 国内仅接受 IP.SB 的 CN 缓存/响应，在线失败、限频或国家冲突回退 ip2region，再回退 GeoLite2；不会使用 ipwho.is/GeoJS，也不会加入国外查询 flight。
+- Go1.26.9 `make test vet smoke` 通过；race+cover 中 onlinegeo 覆盖91.9%，API覆盖94.7%。新增国内持久化缓存、非IP.SB缓存拒绝、错国家拒绝、国内外并发隔离、限频与API回退验证。
+- IP.SB 未提供精度半径时输出 null，不借用 GeoLite2 半径；ISP/carrier 保留实际来源，ASN与地域分开。模拟测试不证明真实位置精度，镜像发布与Oracle验收另行记录。
+- Docker多阶段构建及 `make docker-smoke` 通过，包括scratch/non-root/read-only-rootfs、持久化权限和内置xdb。独立review的race tests及隔离overlay反例通过；安全/质量/变更扫描、合成凭据Compose与本地文档链接通过。本地构建使用缓存builder，临时删除syntax frontend声明绕过Docker Hub超时；正式Dockerfile由CI验证。
+
 ## 国外免 Key 三渠道（2026-10-10，0.5.0）
 
 - IP.SB/ipwho.is/GeoJS全部免Key，在线顺序与配置说明已替换；国内ip2region及GeoLite2离线托底不变。

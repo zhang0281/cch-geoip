@@ -24,6 +24,8 @@ AbuseIPDB BLACKLIST HTTPS → 持久化下载尝试 → 每日 JSON 快照 → �
 
 优先覆盖用于 ip2region 确认的有效 CN 地域；省市成组来自 xdb，不混拼另一个来源的邮编/城市坐标，使用 CCH 原有未知坐标占位。移动品牌通过 carrier.name 展示，不把 ASN organization 改成 ISP，也不由 ISP 品牌推断手机/住宅/VPN 类型。`connection.isp` 是额外 JSON 字段，CCH 可能忽略；_meta 保留来源。原生默认关闭、镜像和 Compose 默认开启，可随时通过开关回退。
 
+0.6.0 起上段属于国内离线 fallback：在线开启时国内优先 IP.SB，失败再执行 ip2region/GeoLite2。
+
 - 离线查询与 ready 需要 City、ASN 都已加载且未超过 BuildEpoch 年龄上限；国外在线 Geo 成功时，MMDB 未就绪仍可返回地理结果，ASN 使用未知占位。
 - MMDB readers 在 lookup 持 RLock，替换/close 持写锁，避免 mmap use-after-close。
 - 更新时先打开并验证两个候选 reader，检查数据库类型及文件标识未变化，再整体切换；失败保留旧 reader。由于官方 updater 独立更新两个 edition，它们不保证同一发布时间，本服务也不假称同版本事务。
@@ -92,3 +94,11 @@ CCH 日期边界：blocklists 的真实列入时间未知时 `listed_at` 返回 
 状态v2保存3provider额度与缓存；v1严格验证后迁移，保留ipwho额度/cooldown/缓存，删除退役ipapi数据，不重置既有消耗。坏状态启动时禁用在线，文件0600且原子rename/fsync；无需存储任何在线GeoKey。缓存最长7天、独立每分钟空闲清理；停止服务无法清理。单进程写同一个目录，多个副本不共享锁，其他同出口程序消耗不受本实例计数控制。
 
 0.4.0已验证race、mock、scratch/non-root/read-onlyrootfs和Oracle真实在线/缓存持久化；0.5.0新增三provider顺序、GeoJS半径/字符串coords、IP.SB短窗口限频及保守迁移测试，生产/发布状态另记验证文档。只有known-location样本才可证明准确率，API连通或字段数量不是精度证据。
+
+## 国内 IP.SB 优先（2026-10-10，0.6.0）
+
+用户选择国内只用 IP.SB 在线优先、ip2region托底。API依据任一本地来源CN选择LookupDomestic；该方法只允许IP.SB及其CN缓存，不调用ipwho/GeoJS，不复用二者旧缓存。CN结果必须有省或市；国家不一致不缓存，回退本地并保留country_mismatch状态。国外Lookup不变。状态文件仍v2，无预算重置或格式迁移。
+
+inflight键增加策略，避免国内等待正在进行的国外查询后拿到国外备用provider结果；两种策略共用总bulkhead与同一IP.SB持久额度，不绕过限频。国内单provider使用整个ONLINE_GEO_TIMEOUT，国外仍每渠道1/3。已有0.5缓存、900/min policy及4096上限保留；国内首查会消耗与国外共享的IP.SB额度。
+
+在线省市、邮编、时区、坐标成组采用IP.SB，不采用ip2region城市配另一来源coords。ISP/carrier仍来自ip2region，ASN来自MMDB，各自metadata标源。此前样本IP.SB长春坐标仍粗略，未知radius=null；用户选择在线优先不等于已证明定位更准。tests覆盖成功覆盖xdb、异常/限频退回xdb、错国家/其他渠道缓存拒绝、策略并发隔离及国内不调用外国外备。生产验收独立记录。

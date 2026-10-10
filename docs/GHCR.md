@@ -5,13 +5,13 @@ GHCR（GitHub Container Registry）托管镜像，GitHub Actions 负责构建；
 ## GitHub Actions 发布
 
 1. 确保仓库允许 GitHub Actions 运行，组织策略没有禁止 workflow 写入 packages。
-2. 在 `Actions > Publish GHCR > Run workflow` 选择 `main`，填写版本，例如 `0.5.0`，不带 `v`。
+2. 在 `Actions > Publish GHCR > Run workflow` 选择 `main`，填写版本，例如 `0.6.0`，不带 `v`。
 3. workflow 先执行完整 CI（race、vet、进程和容器 smoke）；全部通过后才构建、推送双架构镜像。
 
 本仓库对应的发布地址为：
 
 ```text
-ghcr.io/zhang0281/cch-geoip:0.5.0
+ghcr.io/zhang0281/cch-geoip:0.6.0
 ghcr.io/zhang0281/cch-geoip:latest
 ```
 
@@ -22,7 +22,7 @@ ghcr.io/zhang0281/cch-geoip:latest
 也可从项目目录使用 GitHub CLI：
 
 ```sh
-gh workflow run ghcr.yml --ref main -f version=0.5.0
+gh workflow run ghcr.yml --ref main -f version=0.6.0
 gh run list --workflow ghcr.yml
 ```
 
@@ -37,8 +37,8 @@ gh run list --workflow ghcr.yml
 Public 镜像不需要登录，可检查双架构 manifest：
 
 ```sh
-docker buildx imagetools inspect ghcr.io/zhang0281/cch-geoip:0.5.0
-docker pull ghcr.io/zhang0281/cch-geoip:0.5.0
+docker buildx imagetools inspect ghcr.io/zhang0281/cch-geoip:0.6.0
+docker pull ghcr.io/zhang0281/cch-geoip:0.6.0
 ```
 
 若保持 Private，部署机需要使用有 package 读取权限的 GitHub 账号登录。创建带 `read:packages` scope 的 **PAT classic**，在密码提示中输入 PAT，不写进命令行或 Git：
@@ -54,7 +54,7 @@ docker login ghcr.io --username YOUR_GITHUB_USERNAME
 保留项目的 `docker-compose.yml` 和 `.env`，配置实际存在且可访问的版本：
 
 ```dotenv
-CCH_GEOIP_IMAGE=ghcr.io/zhang0281/cch-geoip:0.5.0
+CCH_GEOIP_IMAGE=ghcr.io/zhang0281/cch-geoip:0.6.0
 ```
 
 ```sh

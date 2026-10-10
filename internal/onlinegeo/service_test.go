@@ -206,7 +206,7 @@ func TestCoalescingIncludesFailedResult(t *testing.T) {
 			deadline := time.Now().Add(time.Second)
 			for {
 				s.mu.Lock()
-				n := s.flights[sampleIP].waiters
+				n := s.flights[flightKey{ip: sampleIP}].waiters
 				s.mu.Unlock()
 				if n == 11 {
 					break
@@ -399,12 +399,12 @@ func TestCanceledCallerAndBoundedFlights(t *testing.T) {
 		t.Fatal("canceled lookup sent request")
 	}
 	for i := 0; i < maxFlights; i++ {
-		s.flights[netip.AddrFrom4([4]byte{11, 0, 0, byte(i)})] = &flight{done: make(chan struct{})}
+		s.flights[flightKey{ip: netip.AddrFrom4([4]byte{11, 0, 0, byte(i)})}] = &flight{done: make(chan struct{})}
 	}
 	if r := s.Lookup(context.Background(), sampleIP, time.Now()); r.Location != nil || r.Providers[0].State != "busy" {
 		t.Fatal("outbound bulkhead not bounded")
 	}
-	s.flights = map[netip.Addr]*flight{sampleIP: {done: make(chan struct{}), waiters: maxWaiters}}
+	s.flights = map[flightKey]*flight{flightKey{ip: sampleIP}: {done: make(chan struct{}), waiters: maxWaiters}}
 	if r := s.Lookup(context.Background(), sampleIP, time.Now()); r.Providers[0].State != "busy" {
 		t.Fatal("waiters not bounded")
 	}

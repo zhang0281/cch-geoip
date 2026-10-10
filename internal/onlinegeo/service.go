@@ -69,11 +69,16 @@ type flight struct {
 	waiters int
 }
 
+type flightKey struct {
+	ip       netip.Addr
+	domestic bool
+}
+
 type Service struct {
 	mu           sync.Mutex
 	options      Options
 	state        diskState
-	flights      map[netip.Addr]*flight
+	flights      map[flightKey]*flight
 	client       *http.Client
 	endpoints    map[string]string
 	storageFault bool
@@ -100,7 +105,7 @@ func New(o Options) (*Service, error) {
 		o.IPSBDailyBudget > 1000 || o.IPWhoDailyBudget < 1 || o.IPWhoDailyBudget > 1000 || o.GeoJSDailyBudget < 1 || o.GeoJSDailyBudget > 1000 {
 		return nil, errors.New("invalid online geolocation configuration")
 	}
-	s := &Service{options: o, flights: make(map[netip.Addr]*flight),
+	s := &Service{options: o, flights: make(map[flightKey]*flight),
 		state:     diskState{Version: 2, Cache: make(map[string]cacheEntry), Quotas: map[string]quota{ipsb: {}, ipwho: {}, geojs: {}}},
 		client:    &http.Client{Timeout: o.Timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		endpoints: map[string]string{ipsb: "https://api.ip.sb/geoip", ipwho: "https://ipwho.is", geojs: "https://get.geojs.io/v1/ip/geo"}}
@@ -114,18 +119,28 @@ func New(o Options) (*Service, error) {
 }
 
 func (s *Service) Lookup(ctx context.Context, ip netip.Addr, now time.Time) Result {
+	return s.lookupPolicy(ctx, ip, now, false)
+}
+
+// LookupDomestic never uses another provider or its cached data.
+func (s *Service) LookupDomestic(ctx context.Context, ip netip.Addr, now time.Time) Result {
+	return s.lookupPolicy(ctx, ip, now, true)
+}
+
+func (s *Service) lookupPolicy(ctx context.Context, ip netip.Addr, now time.Time, domestic bool) Result {
 	ip = ip.Unmap()
 	if !publicAddress(ip) {
 		return Result{Providers: []ProviderStatus{{State: "invalid_ip"}}}
 	}
 	s.mu.Lock()
-	if e, ok := s.state.Cache[ip.String()]; ok && !now.Before(e.UpdatedAt) && now.Before(e.UpdatedAt.Add(s.options.CacheTTL)) {
+	key := flightKey{ip: ip, domestic: domestic}
+	if e, ok := s.state.Cache[ip.String()]; ok && (!domestic || (e.Source == ipsb && e.Location.CountryCode == "CN")) && !now.Before(e.UpdatedAt) && now.Before(e.UpdatedAt.Add(s.options.CacheTTL)) {
 		r := Result{Location: &e.Location, Source: e.Source, CacheHit: true, UpdatedAt: e.UpdatedAt,
 			Providers: []ProviderStatus{{Provider: e.Source, State: "ready"}}}
 		s.mu.Unlock()
 		return cloneResult(r)
 	}
-	if f, ok := s.flights[ip]; ok {
+	if f, ok := s.flights[key]; ok {
 		if f.waiters >= maxWaiters {
 			s.mu.Unlock()
 			return Result{Providers: []ProviderStatus{{State: "busy"}}}
@@ -151,22 +166,26 @@ func (s *Service) Lookup(ctx context.Context, ip netip.Addr, now time.Time) Resu
 		return Result{Providers: []ProviderStatus{{State: "busy"}}}
 	}
 	f := &flight{done: make(chan struct{})}
-	s.flights[ip] = f
+	s.flights[key] = f
 	s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, s.options.Timeout)
 	defer cancel()
-	r := s.lookup(ctx, ip, now)
+	r := s.lookup(ctx, ip, now, domestic)
 	s.mu.Lock()
 	f.result = cloneResult(r)
-	delete(s.flights, ip)
+	delete(s.flights, key)
 	close(f.done)
 	s.mu.Unlock()
 	return r
 }
 
-func (s *Service) lookup(ctx context.Context, ip netip.Addr, now time.Time) Result {
+func (s *Service) lookup(ctx context.Context, ip netip.Addr, now time.Time, domestic bool) Result {
 	r := Result{}
-	for _, provider := range []string{ipsb, ipwho, geojs} {
+	providers := []string{ipsb, ipwho, geojs}
+	if domestic {
+		providers = []string{ipsb}
+	}
+	for _, provider := range providers {
 		if ctx.Err() != nil {
 			r.Providers = append(r.Providers, ProviderStatus{provider, "canceled"})
 			break
@@ -176,9 +195,12 @@ func (s *Service) lookup(ctx context.Context, ip netip.Addr, now time.Time) Resu
 			r.Providers = append(r.Providers, ProviderStatus{provider, state})
 			continue
 		}
-		providerCtx, cancel := context.WithTimeout(ctx, s.options.Timeout/3)
+		providerCtx, cancel := context.WithTimeout(ctx, s.options.Timeout/time.Duration(len(providers)))
 		location, state, cooldown := s.fetch(providerCtx, provider, ip, now)
 		cancel()
+		if domestic && location != nil && location.CountryCode != "CN" {
+			location, state = nil, "country_mismatch"
+		}
 		r.Providers = append(r.Providers, ProviderStatus{provider, state})
 		s.mu.Lock()
 		q := s.state.Quotas[provider]

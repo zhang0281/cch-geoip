@@ -45,7 +45,7 @@ ABUSEIPDB_DAILY_BUDGET=900
 
 ## 国外免 Key 在线 Geo
 
-0.5.0开始使用 IP.SB → ipwho.is → GeoJS，三者均不需要账户或API Key。无需注册ipapi.is；旧 `IPAPI_IS_API_KEY` / `_FILE` / `IPAPI_IS_DAILY_BUDGET` 已不使用，无需读取或迁移它们。MaxMind下载凭据与可选AbuseIPDB凭据仍按上文配置。
+0.6.0 国内使用 IP.SB，失败立即回退 ip2region/GeoLite2，不调用 ipwho.is/GeoJS；国外保持 IP.SB → ipwho.is → GeoJS。三者均不需要账户或API Key。无需注册ipapi.is；旧 `IPAPI_IS_API_KEY` / `_FILE` / `IPAPI_IS_DAILY_BUDGET` 已不使用，无需读取或迁移它们。MaxMind下载凭据与可选AbuseIPDB凭据仍按上文配置。
 
 ```dotenv
 ONLINE_GEO_ENABLED=true

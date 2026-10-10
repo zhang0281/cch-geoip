@@ -30,8 +30,14 @@ type regionStub struct{ record ip2region.Record }
 func (s regionStub) Lookup(netip.Addr) (ip2region.Record, error) { return s.record, nil }
 
 type onlineStub struct {
-	calls  int
-	result onlinegeo.Result
+	calls         int
+	domesticCalls int
+	result        onlinegeo.Result
+}
+
+func (s *onlineStub) LookupDomestic(context.Context, netip.Addr, time.Time) onlinegeo.Result {
+	s.domesticCalls++
+	return s.result
 }
 
 func (s *onlineStub) Lookup(context.Context, netip.Addr, time.Time) onlinegeo.Result {
@@ -65,12 +71,12 @@ func lookupJSON(t *testing.T, store Backend, region RegionBackend, online Online
 	return w.Code, d
 }
 
-func TestDomesticNeverCallsOnline(t *testing.T) {
+func TestDomesticIPSBFailureFallsBackWithoutForeignLookup(t *testing.T) {
 	for _, found := range []bool{true, false} {
 		online := &onlineStub{}
 		region := regionStub{ip2region.Record{Available: true, Found: found, Country: "中国", CountryCode: "CN", Province: "吉林省", City: "长春市"}}
 		status, d := lookupJSON(t, geoStub{record: fixtureRecord("CN")}, region, online, "/v1/ip2location/223.104.143.182")
-		if status != 200 || online.calls != 0 {
+		if status != 200 || online.calls != 0 || online.domesticCalls != 1 {
 			t.Fatal("domestic leaked online", status, online.calls)
 		}
 		want := "Offline City"
@@ -80,9 +86,21 @@ func TestDomesticNeverCallsOnline(t *testing.T) {
 		if d["location"].(map[string]any)["city"] != want {
 			t.Fatal("domestic priority incorrect")
 		}
-		if d["_meta"].(map[string]any)["online_geo"].(map[string]any)["state"] != "skipped_domestic" {
+		if d["_meta"].(map[string]any)["online_geo"].(map[string]any)["state"] != "fallback" {
 			t.Fatal("domestic metadata incorrect")
 		}
+	}
+}
+
+func TestDomesticIPSBOverridesIP2Region(t *testing.T) {
+	region := regionStub{ip2region.Record{Available: true, Found: true, Country: "中国", CountryCode: "CN", Province: "吉林省", City: "长春市"}}
+	online := &onlineStub{result: onlinegeo.Result{Source: "ip.sb", Location: &onlinegeo.Location{CountryCode: "CN", Country: "China", Region: "Jilin", City: "Changchun", Timezone: "Asia/Shanghai"}}}
+	status, d := lookupJSON(t, geoStub{record: fixtureRecord("CN")}, region, online, "/v1/ip2location/223.104.143.182")
+	if status != 200 || online.calls != 0 || online.domesticCalls != 1 || d["location"].(map[string]any)["city"] != "Changchun" {
+		t.Fatal("domestic did not prefer IP.SB")
+	}
+	if d["_meta"].(map[string]any)["online_geo"].(map[string]any)["source"] != "ip.sb" {
+		t.Fatal("domestic source metadata incorrect")
 	}
 }
 
@@ -91,7 +109,7 @@ func TestIP2RegionPrimarySurvivesMissingOrConflictingMMDB(t *testing.T) {
 	for _, store := range []geoStub{{record: fixtureRecord("US")}, {err: geoip.ErrNotReady}} {
 		online := &onlineStub{}
 		status, d := lookupJSON(t, store, region, online, "/v1/ip2location/223.104.143.182?lang=zh-CN")
-		if status != 200 || online.calls != 0 {
+		if status != 200 || online.calls != 0 || online.domesticCalls != 1 {
 			t.Fatal("domestic primary incorrectly depends on MMDB")
 		}
 		l := d["location"].(map[string]any)

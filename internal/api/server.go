@@ -31,6 +31,7 @@ type RegionBackend interface {
 
 type OnlineBackend interface {
 	Lookup(context.Context, netip.Addr, time.Time) onlinegeo.Result
+	LookupDomestic(context.Context, netip.Addr, time.Time) onlinegeo.Result
 }
 
 func NewHandler(store Backend, intel *threat.Service, token string, logger *slog.Logger) http.Handler {
@@ -84,8 +85,12 @@ func NewHandlerWithOnline(store Backend, region RegionBackend, online OnlineBack
 		}
 		domestic := record.City.Country.IsoCode == "CN" || (locality.Found && locality.CountryCode == "CN")
 		var result onlinegeo.Result
-		if online != nil && !domestic {
-			result = online.Lookup(r.Context(), ip, now)
+		if online != nil {
+			if domestic {
+				result = online.LookupDomestic(r.Context(), ip, now)
+			} else {
+				result = online.Lookup(r.Context(), ip, now)
+			}
 		}
 		primaryDomestic := locality.Found && locality.CountryCode == "CN" && locality.Country == "中国" && (locality.Province != "" || locality.City != "")
 		if err != nil && result.Location == nil && !primaryDomestic {

@@ -11,8 +11,6 @@ func applyOnlineGeo(data object, result onlinegeo.Result, domestic, enabled bool
 	state := "fallback"
 	if !enabled {
 		state = "disabled"
-	} else if domestic {
-		state = "skipped_domestic"
 	}
 	if result.Location != nil {
 		state = "ready"
@@ -21,7 +19,7 @@ func applyOnlineGeo(data object, result onlinegeo.Result, domestic, enabled bool
 		}
 	}
 	meta["online_geo"] = object{"state": state, "source": nullable(result.Source), "cache_hit": result.CacheHit,
-		"updated_at": nil, "providers": result.Providers}
+		"updated_at": nil, "providers": result.Providers, "domestic": domestic}
 	if !result.UpdatedAt.IsZero() {
 		meta["online_geo"].(object)["updated_at"] = result.UpdatedAt.UTC().Format(time.RFC3339)
 	}
@@ -51,8 +49,9 @@ func applyOnlineGeo(data object, result onlinegeo.Result, domestic, enabled bool
 	location["coordinates"] = coords
 	data["timezone"] = timezone(l.Timezone, now)
 	meta["coordinates_available"], meta["coordinate_source"] = available, result.Source
+	ispSource := meta["location_source"].(object)["isp"]
 	meta["location_source"] = object{"country": result.Source, "region": result.Source, "city": result.Source,
-		"postal_code": result.Source, "timezone": result.Source, "coordinates": result.Source, "isp": "maxmind"}
+		"postal_code": result.Source, "timezone": result.Source, "coordinates": result.Source, "isp": ispSource}
 	meta["location_language"] = "en"
 	meta["location_accuracy"] = nullable(l.Accuracy)
 	meta["source"] = result.Source + " geolocation + MaxMind GeoLite2 ASN"

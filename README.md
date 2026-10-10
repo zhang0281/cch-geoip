@@ -1,8 +1,8 @@
 # cch-geoip
 
-为 Claude Code Hub (CCH) 提供兼容的 IP 归属地接口。国内省市使用 ip2region；国外优先查询免费在线 API，并以本地 GeoLite2 City + ASN 托底。官方 `geoipupdate` 容器定期更新数据库，本服务自动重新加载。
+为 Claude Code Hub (CCH) 提供兼容的 IP 归属地接口。国内优先查询 IP.SB，ip2region 托底；国外优先查询免费在线 API，并以本地 GeoLite2 City + ASN 托底。官方 `geoipupdate` 容器定期更新数据库，本服务自动重新加载。
 
-镜像另内置 ip2region v3.18.0 的 IPv4 / IPv6 xdb。国内省份、城市、ISP 优先采用 ip2region；GeoLite2 保留 ASN 与离线 fallback。国内 ip2region 查询不需要额外账号或在线 API。
+镜像另内置 ip2region v3.18.0 的 IPv4 / IPv6 xdb。国内 IP.SB 不可用时采用 ip2region 省市；ISP 与移动品牌保留 ip2region 来源，GeoLite2 保留 ASN 与最终离线 fallback。在线 Geo 全部免 Key。
 
 可选 threat 增强：Spamhaus DROP IPv4/IPv6 网段、Tor 官方出口名单，以及显式启用的 AbuseIPDB。本地 AbuseIPDB 黑名单优先，未命中才使用缓存或免费账户 CHECK。它们不阻断地理信息查询，也不执行封禁。
 
@@ -81,15 +81,15 @@ IP_GEO_TIMEOUT_MS=3500
 
 ## ip2region 地域与运营商
 
-Docker 镜像及 Compose 默认开启 `IP2REGION_ENABLED=true`；原生 binary 默认关闭。ip2region 返回有效 CN 地域时，优先使用其国家／省／市／ISP，GeoLite2 不可用也可返回国内省市；国内未命中、功能关闭或 xdb 不可用时使用 GeoLite2；国外使用下一节的在线优先策略。ASN 与注册组织仍来自 GeoLite2 ASN，ISP 单独放在 `connection.isp`；移动／联通／电信／广电名称映射到 CCH `carrier.name`，MCC/MNC 保持未知。这不证明当前连接一定是手机网络。
+Docker 镜像及 Compose 默认开启 `IP2REGION_ENABLED=true`；原生 binary 默认关闭。国内 IP.SB 查询失败时，优先使用 ip2region 的国家／省／市，GeoLite2 不可用也可返回国内省市；ip2region 未命中、功能关闭或 xdb 不可用时使用 GeoLite2。关闭在线 Geo 时直接使用上述离线链路。ASN 与注册组织仍来自 GeoLite2 ASN，ISP 单独放在 `connection.isp`；移动／联通／电信／广电名称映射到 CCH `carrier.name`，MCC/MNC 保持未知。这不证明当前连接一定是手机网络。
 
 国内 ip2region 地域生效时不拼接 GeoLite2 的另一城市坐标或邮编：坐标使用 CCH 支持的 `0,0 / accuracy_radius=null` 未知占位，不显示地图；GeoLite2 同为 CN 时保留其时区，否则采用 `Asia/Shanghai` 国家默认值并标明来源。`_meta.ip2region` 和 `location_source` 保留实际来源、版本与匹配状态。国内省市名称为中文，不额外推断英文译名。
 
 Dockerfile 从官方固定 release 下载 xdb，并用 SHA256 校验，许可证随镜像附带；47 MiB 数据不提交 Git。免费数据不定期更新：升级 xdb 需要同步改 Dockerfile 版本/校验和、配置默认版本与测试，然后发布新镜像，不会在请求期间自动下载。挂载自有数据库时设置 `IP2REGION_V4_DB` / `IP2REGION_V6_DB`，通过原子 rename 替换，再发 SIGHUP；损坏更新保留上次有效 reader。
 
-## 国外在线 Geo 与离线回退
+## 在线 Geo 与离线回退
 
-Compose 默认开启 `ONLINE_GEO_ENABLED=true`，原生 binary 默认关闭。国内 ip2region 返回有效 CN 地域时优先使用它，未命中使用 GeoLite2；任一本地来源认定 CN 时都跳过在线 Geo。来源冲突时以有效国内 ip2region 地域为准，不拼接 MaxMind 的其他国家坐标或邮编。
+Compose 默认开启 `ONLINE_GEO_ENABLED=true`，原生 binary 默认关闭。任一本地来源认定 CN 时采用国内策略：**有效 IP.SB 缓存 → IP.SB → ip2region → GeoLite2**，绝不调用或复用 ipwho.is/GeoJS 缓存。IP.SB 国内结果须为 CN 且有省或市；否则视为失败，退回本地。国外保留三渠道链路。
 
 **国外查询：有效缓存 → IP.SB → ipwho.is → GeoJS → GeoLite2。三种在线服务全部免注册、免 Key。** 不再使用 ipapi.is，不依赖网页 demo、HTTP 明文接口或只能查询本机IP的接口。[清单来源](https://github.com/ihmily/ip-info-api) 用于发现候选，实际协议及限频以 [IP.SB](https://ip.sb/api/)、[ipwho.is](https://ipwhois.io/documentation)、[GeoJS](https://www.geojs.io/docs/v1/endpoints/geo/) 官方文档为准。
 
@@ -108,9 +108,9 @@ GEOJS_DAILY_BUDGET=900
 
 每provider默认滚动24h本地预算900次，失败也计额。ipwho.is官方免费上限1000次/日/出口IP；IP.SB当前100次/分钟、最多5次/秒，本项目另限90次/分钟、4次/秒；GeoJS未公布固定免费配额，仍受其反滥用限频，本项目采用900次/24h本地预算。这些本地预算不是上游SLA或额度保证；其他程序/副本共用出口仍会共同消耗限额。429、故障与额度耗尽跳到下个provider，无需自动购买或充值。
 
-默认在线总时限2s，每provider最多三分之一；若启用AbuseIPDB CHECK还可能增加500ms，CCH `IP_GEO_TIMEOUT_MS` 建议3500。现有CCH保持1500ms时，可用 `ONLINE_GEO_TIMEOUT=900ms`；较慢网络更容易回退。有效在线结果可在MMDB不就绪时返回，ASN未知；所有地理来源均不可用才失败。状态损坏/无法写入停用在线模块，不静默重置额度。
+默认在线总时限2s，国外每provider最多三分之一，国内唯一 IP.SB 可使用完整总时限；若启用AbuseIPDB CHECK还可能增加500ms，CCH `IP_GEO_TIMEOUT_MS` 建议3500。现有CCH保持1500ms时，可用 `ONLINE_GEO_TIMEOUT=900ms`；较慢网络更容易回退。有效在线结果可在MMDB不就绪时返回，ASN未知；所有地理来源均不可用才失败。状态损坏/无法写入停用在线模块，不静默重置额度。
 
-`_meta.online_geo`保留实际来源、更新时间、缓存命中和provider回退状态。开启后，未缓存的国外IP会发送给上述提供方并保存在本地缓存，不写业务日志。`ONLINE_GEO_ENABLED=false`恢复纯离线。用途与运行说明见 [ACCOUNTS.md](docs/ACCOUNTS.md)。
+`_meta.online_geo`保留实际来源、国内策略标记、更新时间、缓存命中和provider回退状态。开启后，未缓存国内IP发给IP.SB，国外IP发给所选提供方，并保存在本地缓存，不写业务日志。国内、国外并发合并按策略隔离，不共享超出国内渠道范围的结果。IP.SB 不提供精度半径，国内已有样本城市为长春但坐标仍是粗略值，不承诺实际设备位置；未知半径保持 null。`ONLINE_GEO_ENABLED=false`恢复纯离线。用途与运行说明见 [ACCOUNTS.md](docs/ACCOUNTS.md)。
 
 ## threat 与 privacy
 
