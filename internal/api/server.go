@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/zhang0281/cch-geoip/internal/geoip"
+	"github.com/zhang0281/cch-geoip/internal/ip2region"
 	"github.com/zhang0281/cch-geoip/internal/threat"
 )
 
@@ -21,7 +22,15 @@ type Backend interface {
 	Status(time.Time) geoip.Status
 }
 
+type RegionBackend interface {
+	Lookup(netip.Addr) (ip2region.Record, error)
+}
+
 func NewHandler(store Backend, intel *threat.Service, token string, logger *slog.Logger) http.Handler {
+	return NewHandlerWithRegion(store, nil, intel, token, logger)
+}
+
+func NewHandlerWithRegion(store Backend, region RegionBackend, intel *threat.Service, token string, logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { write(w, 200, object{"status": "ok"}) })
 	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +73,11 @@ func NewHandler(store Backend, intel *threat.Service, token string, logger *slog
 			write(w, 500, object{"error": "database lookup failed"})
 			return
 		}
-		data := response(ip, lang, record, now)
+		var locality ip2region.Record
+		if region != nil {
+			locality, _ = region.Lookup(ip)
+		}
+		data := responseWithRegion(ip, lang, record, locality, now)
 		applyThreat(data, intel.Lookup(r.Context(), ip, now))
 		write(w, 200, data)
 	})

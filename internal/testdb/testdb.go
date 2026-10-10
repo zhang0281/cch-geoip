@@ -13,12 +13,20 @@ import (
 )
 
 func Write(dir, cityName string, built time.Time) (string, string, error) {
+	return write(dir, cityName, built, "US", "United States", "美国", "NA", "North America", "北美洲")
+}
+
+func WriteChina(dir, cityName string, built time.Time) (string, string, error) {
+	return write(dir, cityName, built, "CN", "China", "中国", "AS", "Asia", "亚洲")
+}
+
+func write(dir, cityName string, built time.Time, code, countryEN, countryZH, continentCode, continentEN, continentZH string) (string, string, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", "", err
 	}
 	city := mmdbtype.Map{
-		"country":   mmdbtype.Map{"iso_code": mmdbtype.String("US"), "names": mmdbtype.Map{"en": mmdbtype.String("United States"), "zh-CN": mmdbtype.String("美国")}},
-		"continent": mmdbtype.Map{"code": mmdbtype.String("NA"), "names": mmdbtype.Map{"en": mmdbtype.String("North America")}},
+		"country":   mmdbtype.Map{"iso_code": mmdbtype.String(code), "names": mmdbtype.Map{"en": mmdbtype.String(countryEN), "zh-CN": mmdbtype.String(countryZH)}},
+		"continent": mmdbtype.Map{"code": mmdbtype.String(continentCode), "names": mmdbtype.Map{"en": mmdbtype.String(continentEN), "zh-CN": mmdbtype.String(continentZH)}},
 		"city":      mmdbtype.Map{"names": mmdbtype.Map{"en": mmdbtype.String(cityName)}},
 		"location":  mmdbtype.Map{"latitude": mmdbtype.Float64(37.4), "longitude": mmdbtype.Float64(-122.1), "accuracy_radius": mmdbtype.Uint16(20), "time_zone": mmdbtype.String("America/Los_Angeles")},
 	}
@@ -38,7 +46,7 @@ func writeOne(path, kind string, record mmdbtype.Map, built time.Time) error {
 	if err != nil {
 		return err
 	}
-	for _, cidr := range []string{"8.8.8.0/24", "2001:4860:4860::/48"} {
+	for _, cidr := range []string{"8.8.8.0/24", "2001:4860:4860::/48", "223.104.143.0/24"} {
 		_, network, err := net.ParseCIDR(cidr)
 		if err != nil {
 			return err

@@ -14,6 +14,7 @@ import (
 	"github.com/zhang0281/cch-geoip/internal/api"
 	"github.com/zhang0281/cch-geoip/internal/config"
 	"github.com/zhang0281/cch-geoip/internal/geoip"
+	"github.com/zhang0281/cch-geoip/internal/ip2region"
 	"github.com/zhang0281/cch-geoip/internal/threat"
 )
 
@@ -48,6 +49,11 @@ func run(logger *slog.Logger) error {
 	}
 	store := geoip.NewStore(c.CityDB, c.ASNDB, c.MaxDBAge)
 	defer store.Close()
+	var region *ip2region.Store
+	if c.RegionEnabled {
+		region = ip2region.NewStore(c.RegionV4DB, c.RegionV6DB)
+		defer region.Close()
+	}
 	reload := func() {
 		changed, err := store.Reload()
 		if err != nil {
@@ -59,6 +65,20 @@ func run(logger *slog.Logger) error {
 		}
 	}
 	reload()
+	regionReload := func() {
+		if region == nil {
+			return
+		}
+		changed, err := region.Reload()
+		if err != nil {
+			logger.Warn("ip2region reload failed; retaining last valid searchers", "error", err)
+			return
+		}
+		if changed {
+			logger.Info("ip2region databases loaded")
+		}
+	}
+	regionReload()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	feeds := threat.NewFeeds(c.FeedsEnabled, c.FeedDir, c.FeedMaxAge)
@@ -98,7 +118,11 @@ func run(logger *slog.Logger) error {
 	defer signal.Stop(hup)
 	ticker := time.NewTicker(c.ReloadInterval)
 	defer ticker.Stop()
-	srv := &http.Server{Addr: c.Listen, Handler: api.NewHandler(store, intel, c.Token, logger),
+	var regionBackend api.RegionBackend
+	if region != nil {
+		regionBackend = region
+	}
+	srv := &http.Server{Addr: c.Listen, Handler: api.NewHandlerWithRegion(store, regionBackend, intel, c.Token, logger),
 		ReadHeaderTimeout: 3 * time.Second, ReadTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second,
 		IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
 	result := make(chan error, 1)
@@ -108,8 +132,10 @@ func run(logger *slog.Logger) error {
 		select {
 		case <-ticker.C:
 			reload()
+			regionReload()
 		case <-hup:
 			reload()
+			regionReload()
 		case err := <-result:
 			if err == http.ErrServerClosed {
 				return nil

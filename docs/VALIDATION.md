@@ -1,6 +1,14 @@
 # 验证记录
 
-时间：2026-10-09。源码、配置与测试在 `/home/zhang/work/projects/cch-geoip`。未部署到 Oracle，也未修改既有 CCH。
+源码、配置与测试在 `/home/zhang/work/projects/cch-geoip`。首版历史记录保留于下方；2026-10-09 的 0.2.0 已部署 Oracle，真实数据库/AbuseIPDB 可用，CCH 已切到本地服务。
+
+## ip2region 增量验证（2026-10-10）
+
+- `make test vet smoke` 通过；功能关闭时旧查询路径正常，无 typed nil RegionBackend panic。
+- Docker build 成功拉取固定 v3.18.0 xdb 并校验 SHA256；两个数据文件设为 644，non-root 可读。
+- `make docker-smoke` 使用实际内置 xdb，合成 CN MMDB 请求验证长春/吉林/中国移动、独立 ISP 与 ASN、未知坐标；US 查询保留 GeoLite2 fallback。
+- `make ip2region-smoke` 从镜像提取官方 xdb，执行 IPv4、IPv6、并发查询和损坏/缺失更新保留旧 reader，race 通过，reader 包覆盖率 87.4%。默认单元测试无 xdb 时 skip 此集成用例；CI 的 Docker gate 强制执行。
+- 数据格式/国家一致性限制保留在代码，免费 xdb 只作指定来源，不宣称数据更新或地理精度有 SLA。发布时间、部署镜像和 Oracle 验收将由对应 workflow/运行记录确认。
 
 ## GHCR 迁移
 

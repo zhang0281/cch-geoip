@@ -1,5 +1,7 @@
 # 数据与接口来源
 
+- [ip2region v3.18.0](https://github.com/lionsoul2014/ip2region/releases/tag/v3.18.0)、[数据与更新说明](https://github.com/lionsoul2014/ip2region/blob/v3.18.0/README_zh.md)、[许可证](https://github.com/lionsoul2014/ip2region/blob/v3.18.0/LICENSE.md)：IPv4/IPv6 xdb 用于国内省市和 ISP，免费数据不定期更新，不等于已保证的当前实际位置。镜像附完整许可证；SHA256 v4 `8e31bbdccb5bf21028af10592d4312ec975da0bffa108c0c5d862a12190f9ad3`，v6 `939f6b46bd2b8bec3cf7c5ceb8ba782266ae9b1f35b5ba7916700dec0b7506ed`。
+
 - CCH 路径/鉴权/校验器：[client.ts](https://github.com/ding113/claude-code-hub/blob/main/src/lib/ip-geo/client.ts)。返回字段：[ip-geo.ts](https://github.com/ding113/claude-code-hub/blob/main/src/types/ip-geo.ts)。2026-10-09 核对；可接受字段不等于未来所有 CCH 版本的保证。
 - MaxMind [GeoLite 说明](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data/) 与 [数据更新](https://support.maxmind.com/knowledge-base/articles/download-and-update-maxmind-databases)。City 当前周二/周五，ASN 工作日；本地查询无 web service 次数限制。账号下载与数据使用须遵循提供方许可。
 - 官方 [geoipupdate Docker](https://github.com/maxmind/geoipupdate/blob/main/doc/docker.md)。Compose 固定 v8.0.0，每 24 小时检查 City / ASN。注册 key 不应出现在 Git、CLI 参数或日志中。

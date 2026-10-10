@@ -13,6 +13,7 @@ func TestThreatConfig(t *testing.T) {
 		{"ABUSEIPDB_CACHE_TTL", "0s"}, {"ABUSEIPDB_DAILY_BUDGET", "0"}, {"ABUSEIPDB_DAILY_BUDGET", "bad"},
 		{"ABUSEIPDB_API_KEY", "two words"}, {"ABUSEIPDB_ENABLED", "true"},
 		{"ABUSEIPDB_BLACKLIST_ENABLED", "oops"}, {"ABUSEIPDB_CHECK_ENABLED", "oops"},
+		{"IP2REGION_ENABLED", "oops"},
 	} {
 		t.Run(tc.key+tc.value, func(t *testing.T) {
 			clear(t)
@@ -26,6 +27,9 @@ func TestThreatConfig(t *testing.T) {
 	c, err := Load()
 	if err != nil || !c.AbuseBlacklistEnabled || !c.AbuseCheckEnabled || c.AbuseEnabled {
 		t.Fatal("unexpected Abuse defaults", err)
+	}
+	if c.RegionEnabled || c.RegionDataDir != "/usr/share/ip2region" || c.RegionVersion != "v3.18.0" || c.RegionV4DB != "/usr/share/ip2region/v3.18.0/ip2region_v4.xdb" {
+		t.Fatalf("unexpected ip2region defaults: %+v", c)
 	}
 	path := filepath.Join(t.TempDir(), "key")
 	if err := os.WriteFile(path, []byte("synthetic-key\n"), 0600); err != nil {

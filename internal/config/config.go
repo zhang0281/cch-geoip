@@ -10,19 +10,32 @@ import (
 
 type Config struct {
 	Listen, CityDB, ASNDB, Token                          string
+	RegionV4DB, RegionV6DB                                string
+	RegionDataDir                                         string
+	RegionVersion                                         string
 	ReloadInterval, MaxDBAge                              time.Duration
 	FeedsEnabled, AbuseEnabled                            bool
 	FeedDir, AbuseKey                                     string
 	FeedInterval, FeedMaxAge, AbuseTimeout, AbuseCacheTTL time.Duration
 	AbuseDailyBudget                                      int
 	AbuseBlacklistEnabled, AbuseCheckEnabled              bool
+	RegionEnabled                                         bool
 }
 
 func Load() (Config, error) {
 	c := Config{Listen: value("GEOIP_LISTEN", "127.0.0.1:8080"),
-		CityDB: value("GEOIP_CITY_DB", "/usr/share/GeoIP/GeoLite2-City.mmdb"),
-		ASNDB:  value("GEOIP_ASN_DB", "/usr/share/GeoIP/GeoLite2-ASN.mmdb")}
+		CityDB:        value("GEOIP_CITY_DB", "/usr/share/GeoIP/GeoLite2-City.mmdb"),
+		ASNDB:         value("GEOIP_ASN_DB", "/usr/share/GeoIP/GeoLite2-ASN.mmdb"),
+		RegionDataDir: value("IP2REGION_DATA_DIR", "/usr/share/ip2region"),
+		RegionVersion: value("IP2REGION_VERSION", "v3.18.0")}
+	regionReleaseDir := c.RegionDataDir + "/" + c.RegionVersion
+	c.RegionV4DB = value("IP2REGION_V4_DB", regionReleaseDir+"/ip2region_v4.xdb")
+	c.RegionV6DB = value("IP2REGION_V6_DB", regionReleaseDir+"/ip2region_v6.xdb")
 	var err error
+	c.RegionEnabled, err = boolean("IP2REGION_ENABLED", false)
+	if err != nil {
+		return c, err
+	}
 	c.ReloadInterval, err = duration("GEOIP_RELOAD_INTERVAL", time.Minute, false)
 	if err != nil {
 		return c, err

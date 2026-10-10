@@ -20,6 +20,10 @@ AbuseIPDB BLACKLIST HTTPS → 持久化下载尝试 → 每日 JSON 快照 → �
 
 核心代码：`internal/geoip` 管数据库生命周期；`internal/api` 管 CCH JSON 与输入边界；`internal/threat` 管信誉来源、状态和降级；`internal/config` 管环境变量校验；`cmd/cch-geoip` 管进程生命周期。`internal/testdb` 和 `tools/fixtures` 仅生成合成测试数据，生产 binary 不引用它们。
 
+`internal/ip2region` 使用官方 Go binding 的 VIndexCache + 每协议 4 个 searcher 池，支持并发且无需全量常驻 47 MiB xdb。Reload 串行构造候选、验证类型与文件标识，成功后切换；Lookup 读锁阻止旧池在查询期间关闭。缺失或损坏新文件保留已加载池；首次加载失败退回 GeoLite2。数据路径受信任，镜像内固定 xdb 已经 SHA256 验证；不接受调用者指定路径。
+
+优先覆盖仅用于双方国家为 CN 的 ip2region 地域；省市成组来自 xdb，不混拼另一个来源的邮编/城市坐标，使用 CCH 原有未知坐标占位。移动品牌通过 carrier.name 展示，不把 ASN organization 改成 ISP，也不由 ISP 品牌推断手机/住宅/VPN 类型。`connection.isp` 是额外 JSON 字段，CCH 可能忽略；_meta 保留来源。原生默认关闭、镜像和 Compose 默认开启，可随时通过开关回退。
+
 - 有效查询需要 City、ASN 都已加载且未超过 BuildEpoch 年龄上限。
 - MMDB readers 在 lookup 持 RLock，替换/close 持写锁，避免 mmap use-after-close。
 - 更新时先打开并验证两个候选 reader，检查数据库类型及文件标识未变化，再整体切换；失败保留旧 reader。由于官方 updater 独立更新两个 edition，它们不保证同一发布时间，本服务也不假称同版本事务。
@@ -70,6 +74,8 @@ SSRF 面被固定 provider URL 和 IP literal 验证收窄。AbuseIPDB 只向固
 2026-10-09：添加 AbuseIPDB BLACKLIST 本地优先、持久化尝试限频与 CHECK 独立开关；Compose 统一为 docker-compose.yml，补账户、运行和双架构发布文档。发布 workflow 仅 main 手动触发，完整 CI 成功后才发布镜像。
 
 2026-10-09：镜像发布迁至 GHCR；publish job 单独授予 packages: write，使用自动生成的 GITHUB_TOKEN，不另设发布 PAT。仓库路径转为小写，支持 fork namespace。verify job 保持只读，普通 push/PR 不发布；package 初次默认私有，不自动公开，部署者自行选择 Public 或带 read:packages 的部署机 PAT。旧发布 workflow 与说明移除，源码构建默认保持不变。
+
+2026-10-10：国内地域采用 ip2region v3.18.0；Docker build 从官方 release 下载并校验 SHA256，附项目许可证，data 不入 Git。人工提升数据版本随 image release，不增加动态 updater 或在线 Geo 依赖。Go binding 固定 pseudo-version 02f04aa559ac，与数据版本分别记录。
 
 质量复核接受项：`scripts/smoke.py` 与 `scripts/docker-smoke.py` 的 main 超过通用 50 行 heuristic；它是单次进程验收编排，统一 try/finally 保证子进程与临时目录清理，业务逻辑在 Go 包中。JSON/schema 常量与合成 fixture 的长行属于固定数据，不额外抽象。
 

@@ -1,6 +1,6 @@
 # 发布到 GHCR
 
-GHCR（GitHub Container Registry）托管镜像，GitHub Actions 负责构建；服务仍运行在自己的服务器上。镜像只含应用、CA 和时区数据，不含 GeoLite2 数据库、名单快照或账户凭据。支持 `linux/amd64` 和 `linux/arm64`。
+GHCR（GitHub Container Registry）托管镜像，GitHub Actions 负责构建；服务仍运行在自己的服务器上。镜像含应用、CA、时区和官方固定版本 ip2region xdb 及许可证，不含 GeoLite2 数据库、名单快照或账户凭据。支持 `linux/amd64` 和 `linux/arm64`。
 
 ## GitHub Actions 发布
 

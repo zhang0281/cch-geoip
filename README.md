@@ -2,6 +2,8 @@
 
 为 Claude Code Hub (CCH) 提供兼容的 IP 归属地接口。日常查询直接读取本地 GeoLite2 City + ASN 数据库，不依赖外部 GeoIP API。官方 `geoipupdate` 容器定期更新数据库，本服务自动重新加载。
 
+镜像另内置 ip2region v3.18.0 的 IPv4 / IPv6 xdb。国内省份、城市、ISP 优先采用 ip2region；GeoLite2 保留国家、ASN 与全球 fallback。开启后不需要额外账号或在线 API。
+
 可选 threat 增强：Spamhaus DROP IPv4/IPv6 网段、Tor 官方出口名单，以及显式启用的 AbuseIPDB。本地 AbuseIPDB 黑名单优先，未命中才使用缓存或免费账户 CHECK。它们不阻断地理信息查询，也不执行封禁。
 
 ## 快速部署
@@ -77,6 +79,14 @@ IP_GEO_TIMEOUT_MS=1500
 
 查询路径与返回字段依据 [CCH client](https://github.com/ding113/claude-code-hub/blob/main/src/lib/ip-geo/client.ts) 和 [types](https://github.com/ding113/claude-code-hub/blob/main/src/types/ip-geo.ts)。支持 IPv4、IPv6、中文和英文名称；指定语言无翻译时回退英文。没有记录的公网 IP 返回 `ZZ` 与 nullable ASN。私网、CGN、保留地址和 hostname 被拒绝，不做 DNS 或反向 DNS 请求。
 
+## ip2region 地域与运营商
+
+Docker 镜像及 Compose 默认开启 `IP2REGION_ENABLED=true`；原生 binary 默认关闭。国内记录且 GeoLite2 国家也为 CN 时，优先使用 ip2region 的省／市／ISP；国外、未命中、功能关闭或 xdb 不可用时保留 GeoLite2。ASN 与注册组织仍来自 GeoLite2 ASN，ISP 单独放在 `connection.isp`；移动／联通／电信／广电名称映射到 CCH `carrier.name`，MCC/MNC 保持未知。这不证明当前连接一定是手机网络。
+
+国内 ip2region 地域生效时不拼接 GeoLite2 的另一城市坐标或邮编：坐标使用 CCH 支持的 `0,0 / accuracy_radius=null` 未知占位，不显示地图；时区仍来源于 GeoLite2。`_meta.ip2region` 和 `location_source` 保留实际来源、版本与匹配状态。国内省市名称为中文，不额外推断英文译名。
+
+Dockerfile 从官方固定 release 下载 xdb，并用 SHA256 校验，许可证随镜像附带；47 MiB 数据不提交 Git。免费数据不定期更新：升级 xdb 需要同步改 Dockerfile 版本/校验和、配置默认版本与测试，然后发布新镜像，不会在请求期间自动下载。挂载自有数据库时设置 `IP2REGION_V4_DB` / `IP2REGION_V6_DB`，通过原子 rename 替换，再发 SIGHUP；损坏更新保留上次有效 reader。
+
 ## threat 与 privacy
 
 Compose 默认启用本地名单，原生二进制默认关闭，需 `THREAT_FEEDS_ENABLED=true` 启用。名单每 24 小时更新，保存在独立的 `threat-data` volume；更新失败保留最后有效快照，超过 72 小时的数据不再参与匹配。名单下载不会发送被查询 IP。DROP 原始元数据和版权文本保留在缓存中；使用了 [The Spamhaus Project](https://www.spamhaus.org/blocklists/do-not-route-or-peer/) 的 DROP 数据。
@@ -105,6 +115,10 @@ Compose 默认启用本地名单，原生二进制默认关闭，需 `THREAT_FEE
 | `GEOIP_API_TOKEN` / `GEOIP_API_TOKEN_FILE` | 未设置 | Bearer 鉴权，二者互斥 |
 | `GEOIP_RELOAD_INTERVAL` | `1m` | 文件替换检查间隔，或 SIGHUP |
 | `GEOIP_MAX_DB_AGE` | `720h` | 根据 MMDB BuildEpoch 判断过期；0 显式禁用 |
+| `IP2REGION_ENABLED` | binary `false`；Docker/Compose `true` | 国内省市和 ISP 优先使用 xdb |
+| `IP2REGION_VERSION` | `v3.18.0` | 镜像内 xdb 版本目录；只改该值不会下载新版本 |
+| `IP2REGION_DATA_DIR` | `/usr/share/ip2region` | version 子目录的根目录 |
+| `IP2REGION_V4_DB` / `IP2REGION_V6_DB` | `<DATA_DIR>/<VERSION>/ip2region_v4.xdb` / `ip2region_v6.xdb` | 自定义 IPv4/IPv6 xdb 路径 |
 | `THREAT_FEEDS_ENABLED` | `false`；Compose 为 `true` | 是否下载并匹配本地名单 |
 | `THREAT_CACHE_DIR` | 空；Compose 为 `/var/lib/cch-geoip` | 空值时只保存在内存 |
 | `THREAT_UPDATE_INTERVAL` | `24h` | 至少 24h |
@@ -131,11 +145,14 @@ make vet
 make smoke       # 实际启动进程，验证查询/鉴权/SIGHUP/损坏更新回退/正常退出
 make build
 make docker-smoke # 先构建 cch-geoip:local 镜像，再验证 non-root/cache/CA
+make ip2region-smoke # 从构建镜像提取真实 xdb，验证 reader/并发/坏更新回退
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o bin/cch-geoip-arm64 ./cmd/cch-geoip
 ```
 
 Dockerfile 用 BuildKit 的 TARGETARCH 支持 AMD64 / ARM64。`docker buildx build --platform linux/amd64,linux/arm64 .` 可构建两种架构。`GO_IMAGE` build arg 可替换受限环境中的 builder，`GOPROXY` build arg 可设置依赖代理；最终镜像为 non-root scratch，包含 CA certificates 与嵌入式时区数据。运行镜像只读，数据库只读挂载，唯一可写路径是名单缓存 volume。
 
 测试 fixture 均为合成记录，不能用来判断真实 IP 的归属地或信誉。GeoLite2 城市精度与覆盖有局限，未提供的坐标在 `_meta.coordinates_available` 标为 false。真实 MaxMind 下载、真实 AbuseIPDB 查询及 CCH UI 部署验收需另外验证。
+
+ip2region 集成测试使用官方固定 xdb，单元测试不自动联网；未提供 xdb 时 reader 集成用例会 skip，`make docker-smoke` 会从镜像提取并强制执行该用例，CI 同样执行。
 
 参阅 [DESIGN.md](DESIGN.md)、[验证记录](docs/VALIDATION.md) 和 [数据来源说明](docs/SOURCES.md)。

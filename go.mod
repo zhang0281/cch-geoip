@@ -3,6 +3,7 @@ module github.com/zhang0281/cch-geoip
 go 1.26.0
 
 require (
+	github.com/lionsoul2014/ip2region/binding/golang v0.0.0-20261008081544-02f04aa559ac
 	github.com/maxmind/mmdbwriter v1.2.0
 	github.com/oschwald/geoip2-golang v1.13.0
 )

@@ -56,6 +56,34 @@ def main():
             assert data["timezone"]["id"] == "America/Los_Angeles"
             assert data["timezone"]["current_time"]
             assert data["connection"]["asn"] == 15169
+            assert data["_meta"]["ip2region"]["state"] == "ready"
+            assert data["_meta"]["ip2region"]["version"] == "v3.18.0"
+            # Replace only the synthetic test MMDB with a CN record. The image's
+            # actual bundled xdb must supply the province/city/ISP.
+            subprocess.run([ROOT / "bin/fixtures", tmp, "Wrong MMDB City", "CN"], check=True)
+            for path in Path(tmp).glob("*.mmdb"):
+                path.chmod(0o644)
+            run("docker", "kill", "--signal=HUP", name)
+            connection = http.client.HTTPConnection("127.0.0.1", int(port), timeout=2)
+            try:
+                # Wait for SIGHUP to finish loading the newly replaced files.
+                deadline = time.monotonic() + 5
+                while True:
+                    connection.request("GET", "/v1/ip2location/223.104.143.182?lang=zh-CN")
+                    response = connection.getresponse()
+                    cn = json.loads(response.read())
+                    if cn["location"]["city"] == "长春市":
+                        break
+                    assert time.monotonic() < deadline, "ip2region locality not loaded"
+                    time.sleep(.05)
+                assert cn["location"]["region"]["name"] == "吉林省"
+                assert cn["connection"]["isp"] == "移动"
+                assert cn["connection"]["organization"] == "Example ASN"
+                assert cn["carrier"]["name"] == "中国移动"
+                assert not cn["_meta"]["coordinates_available"]
+                assert cn["location"]["coordinates"]["latitude"] == 0
+            finally:
+                connection.close()
             subprocess.run(["docker", "exec", name, "/cch-geoip", "healthcheck"], check=True)
             subprocess.run(["docker", "run", "--rm", "--read-only", "--cap-drop=ALL",
                             "--security-opt=no-new-privileges:true",
