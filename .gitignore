@@ -8,3 +8,5 @@
 /coverage.out
 *.mmdb
 .code-abyss/
+__pycache__/
+*.pyc
